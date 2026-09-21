@@ -1,0 +1,9 @@
+{
+  "name": "autonomous-devops-swarm",
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix frontend run dev",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build"
+  }
+}
