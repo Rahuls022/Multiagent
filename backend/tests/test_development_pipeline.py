@@ -24,6 +24,8 @@ class DevelopmentPipelineTests(unittest.TestCase):
         )
         self.assertTrue(all(stage["status"] == "completed" for stage in result["stages"]))
         saved = asyncio.run(repository.get(result["task"]["id"]))
+        self.assertIsNotNone(saved)
+        assert saved is not None
         self.assertEqual(saved["status"], "completed")
         self.assertEqual(len(asyncio.run(repository.list())), 1)
 

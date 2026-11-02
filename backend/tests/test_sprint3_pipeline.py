@@ -29,6 +29,8 @@ class Sprint3PipelineTests(unittest.TestCase):
         self.assertEqual(result["observer"]["failures_detected"], 0)
         self.assertIn("PIPELINE_COMPLETED", [event["event"] for event in result["events"]])
         saved = asyncio.run(repository.get(result["task"]["id"]))
+        self.assertIsNotNone(saved)
+        assert saved is not None
         self.assertEqual(saved["status"], "completed")
 
     def test_failure_is_observed_and_operations_is_not_started(self):
