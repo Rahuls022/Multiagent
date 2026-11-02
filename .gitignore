@@ -37,3 +37,13 @@ Thumbs.db
 .vscode/
 .idea/
 .gemini/
+
+# Databases (Local runtime databases)
+*.db
+*.sqlite
+*.sqlite3
+
+# Dynamic Workspaces & Scratch Folders
+workspaces/
+backend/workspaces/
+scratch/
