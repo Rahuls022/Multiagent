@@ -1,5 +1,11 @@
 import asyncio
+import sys
 import unittest
+from pathlib import Path
+
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from app.agents import DevelopmentSupervisor
 from app.database import InMemoryPipelineRepository
@@ -20,3 +26,7 @@ class DevelopmentPipelineTests(unittest.TestCase):
         saved = asyncio.run(repository.get(result["task"]["id"]))
         self.assertEqual(saved["status"], "completed")
         self.assertEqual(len(asyncio.run(repository.list())), 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

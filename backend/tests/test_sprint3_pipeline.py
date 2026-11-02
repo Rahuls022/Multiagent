@@ -1,5 +1,11 @@
 import asyncio
+import sys
 import unittest
+from pathlib import Path
+
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from app.agents import GlobalOrchestrator
 from app.agents.base_agent import BaseAgent
@@ -38,8 +44,11 @@ class Sprint3PipelineTests(unittest.TestCase):
             ).run_pipeline("Build a failing portal")
         )
 
-
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["observer"]["failures_detected"], 1)
         self.assertEqual(result["observer"]["failed_agents"], ["Build Agent"])
         self.assertNotIn("operations", result["teams"])
+
+
+if __name__ == "__main__":
+    unittest.main()
