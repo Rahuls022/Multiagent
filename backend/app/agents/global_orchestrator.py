@@ -35,8 +35,16 @@ class GlobalOrchestrator:
         self.operations_supervisor = operations_supervisor or OperationsSupervisor()
         self.observer = observer or ObserverAgent()
 
-    async def run_pipeline(self, request: str) -> dict[str, Any]:
-        task = {"id": str(uuid4()), "request": request, "created_at": datetime.now(UTC).isoformat()}
+    async def run_pipeline(
+        self, request: str, user_id: str | None = None, project_id: str | None = None
+    ) -> dict[str, Any]:
+        task = {
+            "id": str(uuid4()),
+            "request": request,
+            "user_id": user_id,
+            "project_id": project_id,
+            "created_at": datetime.now(UTC).isoformat(),
+        }
         
         # High level phase decomposition event
         initial_events = [
