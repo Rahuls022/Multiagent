@@ -1,35 +1,321 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-const apiBase = 'http://127.0.0.1:8000/api'
+const apiBase = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api'
 const developmentAgents = ['Planning Agent', 'Coding Agent', 'Build Agent', 'Testing Agent']
 const operationsAgents = ['Security Agent', 'Release Agent', 'Deploy Agent', 'Monitor Agent']
 const allAgents = [...developmentAgents, ...operationsAgents]
 const implementedAgents = new Set(['Planning Agent', 'Coding Agent'])
 
+function EyeIcon({ visible }) {
+  return visible ? (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  )
+}
+
 function AuthScreen({ onAuthenticated }) {
   const [mode, setMode] = useState('signin')
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', rememberMe: true })
   const [error, setError] = useState('')
-  const update = (key) => (event) => setForm({ ...form, [key]: event.target.value })
+  const [success, setSuccess] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
-  function submit(event) {
-    event.preventDefault()
-    if (mode === 'signup' && form.password !== form.confirmPassword) return setError('Passwords do not match.')
-    if (form.password.length < 4) return setError('Use at least 4 characters for your password.')
-    const user = mode === 'signup' ? form.name || form.email.split('@')[0] : form.email.split('@')[0] || 'Operator'
-    localStorage.setItem('swarm-user', user)
-    onAuthenticated(user)
+  const update = (key) => (event) => {
+    setForm({ ...form, [key]: event.target.value })
+    if (error) setError('')
   }
 
-  return <main className="auth-page">
-    <section className="auth-intro"><p className="eyebrow">AUTONOMOUS DEVOPS SWARM</p><h1>Eight agents. One reliable release.</h1><p>Plan, build, secure, deploy, and observe every delivery workflow from one calm control room.</p><div className="auth-points"><span>◈ Eight specialised agents</span><span>◈ Observable pipelines</span><span>◈ Safer releases</span></div></section>
-    <section className="auth-card"><div className="auth-tabs"><button className={mode === 'signin' ? 'active' : ''} onClick={() => { setMode('signin'); setError('') }}>Sign in</button><button className={mode === 'signup' ? 'active' : ''} onClick={() => { setMode('signup'); setError('') }}>Create account</button></div><div className="auth-heading"><p className="section-label">{mode === 'signin' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p><p>{mode === 'signin' ? 'Sign in to access mission control.' : 'Start orchestrating your first delivery mission.'}</p></div><form className="auth-form" onSubmit={submit}>{mode === 'signup' && <label>Full name<input value={form.name} onChange={update('name')} placeholder="Alex Morgan" required /></label>}<label>Email<input type="email" value={form.email} onChange={update('email')} placeholder="you@example.com" required /></label><label>Password<input type="password" value={form.password} onChange={update('password')} placeholder="••••••••" required /></label>{mode === 'signup' && <label>Confirm password<input type="password" value={form.confirmPassword} onChange={update('password')} placeholder="••••••••" required /></label>}{error && <p className="error">{error}</p>}<button className="primary-button" type="submit">{mode === 'signin' ? 'Enter mission control' : 'Create account'}</button></form><p className="auth-note">Demo authentication — your account is stored only in this browser.</p></section>
-  </main>
+  async function submit(event) {
+    event.preventDefault()
+    setError('')
+    setSuccess('')
+
+    const cleanEmail = form.email.trim().toLowerCase()
+    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
+    if (!emailValid) {
+      return setError('Please enter a valid email address (e.g. operator@example.com).')
+    }
+
+    if (form.password.length < 8) {
+      return setError('Password must contain at least 8 characters.')
+    }
+
+    if (mode === 'signup') {
+      if (!form.name.trim() || form.name.trim().length < 2) {
+        return setError('Please enter your full name (at least 2 characters).')
+      }
+      if (form.password !== form.confirmPassword) {
+        return setError('Passwords do not match. Please verify your confirm password field.')
+      }
+    }
+
+    setSubmitting(true)
+
+    try {
+      if (mode === 'signup') {
+        const response = await fetch(`${apiBase}/auth/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            full_name: form.name.trim(),
+            email: cleanEmail,
+            password: form.password,
+            confirm_password: form.confirmPassword,
+          }),
+        })
+
+        const data = await response.json()
+        if (!response.ok) {
+          const detail = typeof data.detail === 'string'
+            ? data.detail
+            : Array.isArray(data.detail) && data.detail[0]?.msg
+              ? data.detail[0].msg
+              : 'Failed to create account. Please check your inputs.'
+          setError(detail)
+          return
+        }
+
+        // Store session token permanently
+        localStorage.setItem('swarm_token', data.access_token)
+        localStorage.setItem('swarm_user', JSON.stringify(data.user))
+        sessionStorage.removeItem('swarm_token')
+        sessionStorage.removeItem('swarm_user')
+
+        setSuccess('Account created successfully! Entering mission control…')
+        setTimeout(() => {
+          onAuthenticated(data.user, data.access_token)
+        }, 300)
+      } else {
+        const response = await fetch(`${apiBase}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            password: form.password,
+            remember_me: Boolean(form.rememberMe),
+          }),
+        })
+
+        const data = await response.json()
+        if (!response.ok) {
+          const detail = typeof data.detail === 'string'
+            ? data.detail
+            : 'Invalid email or password. Please verify your credentials.'
+          setError(detail)
+          return
+        }
+
+        if (form.rememberMe) {
+          localStorage.setItem('swarm_token', data.access_token)
+          localStorage.setItem('swarm_user', JSON.stringify(data.user))
+          sessionStorage.removeItem('swarm_token')
+          sessionStorage.removeItem('swarm_user')
+        } else {
+          sessionStorage.setItem('swarm_token', data.access_token)
+          sessionStorage.setItem('swarm_user', JSON.stringify(data.user))
+          localStorage.removeItem('swarm_token')
+          localStorage.removeItem('swarm_user')
+        }
+
+        onAuthenticated(data.user, data.access_token)
+      }
+    } catch (err) {
+      console.error('Authentication request error:', err)
+      setError(`Unable to connect to the authentication server at ${apiBase}. Please ensure the backend is running.`)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <main className="auth-page">
+      <section className="auth-intro">
+        <p className="eyebrow">AUTONOMOUS DEVOPS SWARM</p>
+        <h1>Eight agents. One reliable release.</h1>
+        <p>Plan, build, secure, deploy, and observe every delivery workflow from one calm control room.</p>
+        <div className="auth-points">
+          <span>◈ Eight specialised agents</span>
+          <span>◈ Observable pipelines</span>
+          <span>◈ Safer releases</span>
+        </div>
+      </section>
+
+      <section className="auth-card">
+        <div className="auth-tabs">
+          <button
+            type="button"
+            className={mode === 'signin' ? 'active' : ''}
+            onClick={() => {
+              setMode('signin')
+              setError('')
+              setSuccess('')
+              setForm((prev) => ({ ...prev, password: '', confirmPassword: '' }))
+            }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            className={mode === 'signup' ? 'active' : ''}
+            onClick={() => {
+              setMode('signup')
+              setError('')
+              setSuccess('')
+              setForm((prev) => ({ ...prev, password: '', confirmPassword: '' }))
+            }}
+          >
+            Create account
+          </button>
+        </div>
+
+        <div className="auth-heading">
+          <p className="section-label">{mode === 'signin' ? 'WELCOME BACK' : 'CREATE ACCOUNT'}</p>
+          <p>{mode === 'signin' ? 'Sign in to access mission control.' : 'Register your operator credentials to launch missions.'}</p>
+        </div>
+
+        <form className="auth-form" onSubmit={submit}>
+          {mode === 'signup' && (
+            <label>
+              Full name
+              <input
+                value={form.name}
+                onChange={update('name')}
+                placeholder="Alex Morgan"
+                required
+                minLength="2"
+                autoComplete="name"
+                disabled={submitting}
+              />
+            </label>
+          )}
+
+          <label>
+            Email address
+            <input
+              type="email"
+              value={form.email}
+              onChange={update('email')}
+              placeholder="you@example.com"
+              required
+              autoComplete="email"
+              disabled={submitting}
+            />
+          </label>
+
+          <label>
+            Password
+            <div className="password-input-wrapper">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={form.password}
+                onChange={update('password')}
+                placeholder={mode === 'signup' ? 'At least 8 characters' : '••••••••'}
+                required
+                minLength="8"
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                disabled={submitting}
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword(!showPassword)}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                tabIndex="-1"
+              >
+                <EyeIcon visible={showPassword} />
+              </button>
+            </div>
+          </label>
+
+          {mode === 'signup' && (
+            <label>
+              Confirm password
+              <div className="password-input-wrapper">
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={form.confirmPassword}
+                  onChange={update('confirmPassword')}
+                  placeholder="Repeat your password"
+                  required
+                  minLength="8"
+                  autoComplete="new-password"
+                  disabled={submitting}
+                />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  tabIndex="-1"
+                >
+                  <EyeIcon visible={showConfirmPassword} />
+                </button>
+              </div>
+            </label>
+          )}
+
+          {mode === 'signin' && (
+            <label className="auth-checkbox-label">
+              <input
+                type="checkbox"
+                checked={form.rememberMe}
+                onChange={(e) => setForm({ ...form, rememberMe: e.target.checked })}
+                disabled={submitting}
+              />
+              <span>Remember this session</span>
+            </label>
+          )}
+
+          {error && (
+            <div className="auth-error" role="alert">
+              <span>⚠️</span>
+              <div>{error}</div>
+            </div>
+          )}
+
+          {success && (
+            <div className="auth-success" role="status">
+              <span>✓</span>
+              <div>{success}</div>
+            </div>
+          )}
+
+          <button className="primary-button" type="submit" disabled={submitting}>
+            {submitting ? (
+              <>
+                <span className="spinner" />
+                {mode === 'signin' ? 'Signing in…' : 'Creating account…'}
+              </>
+            ) : mode === 'signin' ? (
+              'Enter mission control'
+            ) : (
+              'Create account'
+            )}
+          </button>
+        </form>
+
+        <p className="auth-note">Secured by Autonomous DevOps Swarm API &amp; PBKDF2 authentication.</p>
+      </section>
+    </main>
+  )
 }
 
 function App() {
-  const [user, setUser] = useState(() => localStorage.getItem('swarm-user'))
+  const [token, setToken] = useState(() => localStorage.getItem('swarm_token') || sessionStorage.getItem('swarm_token'))
+  const [user, setUser] = useState(null)
+  const [authChecking, setAuthChecking] = useState(Boolean(localStorage.getItem('swarm_token') || sessionStorage.getItem('swarm_token')))
   const [page, setPage] = useState('dashboard')
   const [request, setRequest] = useState('Build a student management portal')
   const [pipeline, setPipeline] = useState(null)
@@ -52,17 +338,102 @@ function App() {
   const [workflowExpanded, setWorkflowExpanded] = useState(false)
   const missionInputRef = useRef(null)
 
-  async function loadHistory() { 
-    const response = await fetch(`${apiBase}/pipelines`)
+  const handleSignOut = useCallback(async () => {
+    try {
+      const activeToken = token || localStorage.getItem('swarm_token') || sessionStorage.getItem('swarm_token')
+      if (activeToken) {
+        await fetch(`${apiBase}/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${activeToken}` },
+        })
+      }
+    } catch {
+      // safe fallback
+    } finally {
+      localStorage.removeItem('swarm_token')
+      sessionStorage.removeItem('swarm_token')
+      localStorage.removeItem('swarm_user')
+      sessionStorage.removeItem('swarm_user')
+      setToken(null)
+      setUser(null)
+    }
+  }, [token])
+
+  // Verify session on mount
+  useEffect(() => {
+    let isMounted = true
+    async function verifySession() {
+      const activeToken = localStorage.getItem('swarm_token') || sessionStorage.getItem('swarm_token')
+      if (!activeToken) {
+        if (isMounted) setAuthChecking(false)
+        return
+      }
+
+      try {
+        const response = await fetch(`${apiBase}/auth/me`, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        })
+        if (response.ok) {
+          const userData = await response.json()
+          if (isMounted) {
+            setUser(userData)
+            setToken(activeToken)
+          }
+        } else {
+          // Token expired or invalid
+          localStorage.removeItem('swarm_token')
+          sessionStorage.removeItem('swarm_token')
+          localStorage.removeItem('swarm_user')
+          sessionStorage.removeItem('swarm_user')
+          if (isMounted) {
+            setToken(null)
+            setUser(null)
+          }
+        }
+      } catch (err) {
+        console.warn('Backend unavailable during session verify:', err)
+        const cachedUserStr = localStorage.getItem('swarm_user') || sessionStorage.getItem('swarm_user')
+        if (cachedUserStr && isMounted) {
+          try {
+            setUser(JSON.parse(cachedUserStr))
+          } catch {
+            setUser({ full_name: cachedUserStr, email: '' })
+          }
+        }
+      } finally {
+        if (isMounted) setAuthChecking(false)
+      }
+    }
+
+    verifySession()
+    return () => { isMounted = false }
+  }, [])
+
+  const loadHistory = useCallback(async () => {
+    if (!token) return
+    const response = await fetch(`${apiBase}/pipelines`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (response.status === 401) {
+      handleSignOut()
+      throw new Error('Session expired. Please sign in again.')
+    }
     if (!response.ok) throw new Error('Could not load pipeline history.')
     const data = await response.json()
     setHistory(data.pipelines)
-    setStorage(data.storage) 
-  }
+    setStorage(data.storage)
+  }, [token, handleSignOut])
 
-  async function loadFailures() {
+  const loadFailures = useCallback(async () => {
+    if (!token) return
     try {
-      const res = await fetch(`${apiBase}/failures`)
+      const res = await fetch(`${apiBase}/failures`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.status === 401) {
+        handleSignOut()
+        return
+      }
       if (res.ok) {
         const data = await res.json()
         setFailures(data.failures || [])
@@ -70,14 +441,14 @@ function App() {
     } catch {
       // safe fallback
     }
-  }
+  }, [token, handleSignOut])
 
-  useEffect(() => { 
-    if (user) {
+  useEffect(() => {
+    if (user && token) {
       loadHistory().catch(() => setStorage('backend unavailable'))
       loadFailures()
     }
-  }, [user])
+  }, [user, token, loadHistory, loadFailures])
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme
@@ -91,27 +462,34 @@ function App() {
     setMissionEditPending(false)
   }, [page, missionEditPending])
 
-  async function runPipeline(event) { 
+  async function runPipeline(event) {
     event.preventDefault()
     setRunning(true)
     setError('')
     setClearedLogs(false)
-    try { 
-      const response = await fetch(`${apiBase}/pipelines`, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ request }) 
+    try {
+      const response = await fetch(`${apiBase}/pipelines`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ request }),
       })
+      if (response.status === 401) {
+        handleSignOut()
+        throw new Error('Your session has expired. Please sign in again.')
+      }
       if (!response.ok) throw new Error('The backend could not start the pipeline.')
       setPipeline(await response.json())
       setPage('dashboard')
       await loadHistory()
       await loadFailures()
-    } catch (err) { 
-      setError(err.message) 
-    } finally { 
-      setRunning(false) 
-    } 
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRunning(false)
+    }
   }
 
   async function triggerSimulatedFailure() {
@@ -120,9 +498,16 @@ function App() {
     try {
       const response = await fetch(`${apiBase}/pipelines/simulate-failure`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request: `${request} (Self-Healing Test)` })
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ request: `${request} (Self-Healing Test)` }),
       })
+      if (response.status === 401) {
+        handleSignOut()
+        throw new Error('Your session has expired. Please sign in again.')
+      }
       if (!response.ok) throw new Error('Could not execute simulated failure.')
       const result = await response.json()
       setPipeline(result)
@@ -147,25 +532,25 @@ function App() {
     return pipeline?.stages.find((stage) => stage.agent === agent) ?? { agent, status: 'waiting' }
   }
 
-  const logs = useMemo(() => { 
+  const logs = useMemo(() => {
     if (clearedLogs) return []
     const list = pipeline?.logs ?? []
-    return logLevel === 'all' ? list : list.filter((log) => log.message.toLowerCase().includes(logLevel)) 
+    return logLevel === 'all' ? list : list.filter((log) => log.message.toLowerCase().includes(logLevel))
   }, [pipeline, logLevel, clearedLogs])
 
   const observer = pipeline?.observer
   const nav = [
-    ['dashboard', 'Dashboard'], 
+    ['dashboard', 'Dashboard'],
     ['healing', 'Self-Healing'],
-    ['agents', 'Agents'], 
-    ['logs', 'Logs'], 
-    ['database', 'Database'], 
-    ['settings', 'Settings']
+    ['agents', 'Agents'],
+    ['logs', 'Logs'],
+    ['database', 'Database'],
+    ['settings', 'Settings'],
   ]
 
   const openInspector = (agent) => { setSelectedAgent(agent); setInspectorOpen(true) }
 
-  const renderStages = (agents) => <ul className="agent-list">{agents.map((agent) => { 
+  const renderStages = (agents) => <ul className="agent-list">{agents.map((agent) => {
     const stage = stageFor(agent)
     return <li key={agent} onClick={() => openInspector(agent)} style={{ cursor: 'pointer' }}>
       <span className={`agent-dot ${stage.status}`} />
@@ -174,10 +559,28 @@ function App() {
         <small>{stage.status === 'completed' ? `Completed${stage.duration_ms ? ` · ${stage.duration_ms}ms` : ''}` : stage.status === 'healed' ? '⚡ Healed by Self-Healing Agent' : stage.status}</small>
       </div>
       <span className={`status-pill ${stage.status}`}>{stage.status}</span>
-    </li> 
+    </li>
   })}</ul>
 
-  if (!user) return <AuthScreen onAuthenticated={setUser} />
+  if (authChecking) {
+    return (
+      <div className="auth-loading-splash">
+        <span className="spinner" style={{ width: 28, height: 28 }} />
+        <p>Connecting to Autonomous DevOps Swarm…</p>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <AuthScreen
+        onAuthenticated={(userData, authToken) => {
+          setUser(userData)
+          setToken(authToken)
+        }}
+      />
+    )
+  }
 
   return <main className="app-shell">
     <aside className="sidebar">
@@ -202,9 +605,9 @@ function App() {
           <h1>{page === 'dashboard' ? 'Mission control' : page === 'healing' ? 'Self-Healing & DB Failure Memory' : page[0].toUpperCase() + page.slice(1)}</h1>
         </div>
         <div className="user-menu">
-          <span className="avatar">{user[0]?.toUpperCase()}</span>
-          <div><strong>{user}</strong><small>Operator</small></div>
-          <button title="Sign out" className="signout" onClick={() => { localStorage.removeItem('swarm-user'); setUser(null) }}>Sign out</button>
+          <span className="avatar">{(user.full_name || user.email || 'O')[0].toUpperCase()}</span>
+          <div><strong>{user.full_name || user.email}</strong><small>{user.email || 'Operator'}</small></div>
+          <button title="Sign out" className="signout" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
 
@@ -274,7 +677,17 @@ function App() {
       {page === 'settings' && <section className="panel settings"><div className="panel-heading"><div><p className="section-label">PREFERENCES</p><h2>Workspace settings</h2></div><button onClick={() => setSettings({ theme: 'dark', notifications: true, codingAgent: true })}>Reset</button></div><label>Theme<select value={settings.theme} onChange={(e) => setSettings({ ...settings, theme: e.target.value })}><option value="dark">Dark</option><option value="light">Light</option></select></label><label className="toggle-row"><span><b>Pipeline alerts</b><small>Notify when a pipeline needs attention.</small></span><input type="checkbox" checked={settings.notifications} onChange={(e) => setSettings({ ...settings, notifications: e.target.checked })} /></label><label className="toggle-row"><span><b>Coding agent</b><small>Allow the coding specialist in new missions.</small></span><input type="checkbox" checked={settings.codingAgent} onChange={(e) => setSettings({ ...settings, codingAgent: e.target.checked })} /></label><button className="primary-button" onClick={() => alert('Settings saved for this session.')}>Save changes</button></section>}
 
       {page === 'dashboard' && <WorkflowSidebar pipeline={pipeline} request={request} onInspect={openInspector} minimized={workflowMinimized} expanded={workflowExpanded} onMinimize={() => setWorkflowMinimized(!workflowMinimized)} onExpand={() => { setWorkflowMinimized(false); setWorkflowExpanded(!workflowExpanded) }} />}
-      {inspectorOpen && <InspectModal agent={selectedAgent} stage={stageFor(selectedAgent)} request={request} onClose={() => setInspectorOpen(false)} onEdit={editMission} />}
+      {inspectorOpen && (
+        <InspectModal
+          agent={selectedAgent}
+          stage={stageFor(selectedAgent)}
+          request={request}
+          pipeline={pipeline}
+          token={token}
+          onClose={() => setInspectorOpen(false)}
+          onEdit={editMission}
+        />
+      )}
     </section>
   </main>
 }
@@ -438,11 +851,12 @@ function WorkflowStage({ title, agentName, status, stageData, empty, onInspect }
     {/* Code File Preview Badges */}
     {agentName === 'Coding Agent' && files.length > 0 && (
       <div className="mini-card-list">
-        <p className="mini-label">GENERATED SOURCE CODE ({files.length} FILES):</p>
+        <p className="mini-label">WORKSPACE FILES ({files.length} ON DISK):</p>
         <div className="file-tag-group">
           {files.map(f => (
-            <span key={f.path} className="file-badge">
+            <span key={f.path} className={`file-badge status-${f.status || 'created'}`}>
               📄 {f.path.split('/').pop()}
+              <span className={`badge-pill ${f.status || 'created'}`}>{f.status === 'modified' ? 'MOD' : 'NEW'}</span>
             </span>
           ))}
         </div>
@@ -470,9 +884,11 @@ function WorkflowStage({ title, agentName, status, stageData, empty, onInspect }
   </section>
 }
 
-function InspectModal({ agent, stage, request, onClose, onEdit }) {
+function InspectModal({ agent, stage, request, pipeline, token, onClose, onEdit }) {
   const [viewMode, setViewMode] = useState('formatted') // 'formatted' | 'raw'
   const output = stage?.output
+  const projectId = output?.project_id || pipeline?.task?.project_id || 'project_default'
+  const workspaceDir = output?.workspace_dir
 
   return <div role="dialog" aria-modal="true" aria-label="Agent inspection" className="modal-backdrop" onMouseDown={onClose}>
     <section className="inspect-modal-panel" onMouseDown={(event) => event.stopPropagation()}>
@@ -504,7 +920,16 @@ function InspectModal({ agent, stage, request, onClose, onEdit }) {
         ) : agent === 'Planning Agent' ? (
           <PlanViewer plan={output} />
         ) : agent === 'Coding Agent' ? (
-          <CodeExplorer files={output.files_to_create || []} summary={output.summary} _planUsed={output.plan_used} order={output.implementation_order || []} result={output.user_visible_result} />
+          <CodeExplorer
+            files={output.files_to_create || []}
+            summary={output.summary}
+            _planUsed={output.plan_used}
+            order={output.implementation_order || []}
+            result={output.user_visible_result}
+            projectId={projectId}
+            workspaceDir={workspaceDir}
+            token={token}
+          />
         ) : (
           <pre className="raw-json">{JSON.stringify(output, null, 2)}</pre>
         )}
@@ -539,8 +964,8 @@ function PlanViewer({ plan }) {
         <div className="arch-grid">
           {arch.frontend && <div className="arch-card"><span className="arch-icon">💻</span><div><strong>Frontend SPA</strong><p>{arch.frontend}</p></div></div>}
           {arch.backend && <div className="arch-card"><span className="arch-icon">⚙️</span><div><strong>Backend API Layer</strong><p>{arch.backend}</p></div></div>}
-          {arch.database && <div className="arch-card"><span className="arch-icon">🗄️</span><div><strong>Database & Persistence</strong><p>{arch.database}</p></div></div>}
-          {arch.security && <div className="arch-card"><span className="arch-icon">🔒</span><div><strong>Security & Authentication</strong><p>{arch.security}</p></div></div>}
+          {arch.database && <div className="arch-card"><span className="arch-icon">🗄️</span><div><strong>Database &amp; Persistence</strong><p>{arch.database}</p></div></div>}
+          {arch.security && <div className="arch-card"><span className="arch-icon">🔒</span><div><strong>Security &amp; Authentication</strong><p>{arch.security}</p></div></div>}
         </div>
       </div>
     )}
@@ -548,7 +973,7 @@ function PlanViewer({ plan }) {
     {/* Domain Models & Database Schemas */}
     {models.length > 0 && (
       <div className="section-block">
-        <h4>⚡ Synthesized Domain Models & Schemas</h4>
+        <h4>⚡ Synthesized Domain Models &amp; Schemas</h4>
         <div className="models-grid">
           {models.map((model) => (
             <div key={model.name} className="model-card">
@@ -595,7 +1020,7 @@ function PlanViewer({ plan }) {
     {/* Execution Steps */}
     {steps.length > 0 && (
       <div className="section-block">
-        <h4>📋 Implementation Roadmap & Deliverables</h4>
+        <h4>📋 Implementation Roadmap &amp; Deliverables</h4>
         <div className="roadmap-list">
           {steps.map((st) => (
             <div key={st.step} className="roadmap-step">
@@ -617,89 +1042,208 @@ function PlanViewer({ plan }) {
   </div>
 }
 
-function CodeExplorer({ files, summary, _planUsed, order, result }) {
+function CodeExplorer({ files = [], summary, _planUsed, order = [], result, projectId, workspaceDir, token }) {
+  const [fileList, setFileList] = useState(files)
   const [activeFileIndex, setActiveFileIndex] = useState(0)
   const [copied, setCopied] = useState(false)
-  const activeFile = files[activeFileIndex] || files[0]
+  const [isEditing, setIsEditing] = useState(false)
+  const [editorContent, setEditorContent] = useState('')
+  const [saveLoading, setSaveLoading] = useState(false)
+  const [saveFeedback, setSaveFeedback] = useState(null)
+
+  useEffect(() => {
+    setFileList(files)
+    setActiveFileIndex(0)
+    setIsEditing(false)
+    setSaveFeedback(null)
+  }, [files])
+
+  const activeFile = fileList[activeFileIndex] || fileList[0]
+
+  useEffect(() => {
+    if (activeFile) {
+      setEditorContent(activeFile.code || '')
+      setIsEditing(false)
+      setSaveFeedback(null)
+    }
+  }, [activeFile])
 
   const copyCode = () => {
-    if (!activeFile?.code) return
-    navigator.clipboard.writeText(activeFile.code)
+    const textToCopy = isEditing ? editorContent : (activeFile?.code || '')
+    if (!textToCopy) return
+    navigator.clipboard.writeText(textToCopy)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  return <div className="code-explorer">
-    <div className="code-header-info">
-      <div>
-        <h3>⚡ Generated Source Code Files</h3>
-        <p>{summary || 'Complete software implementation code generated by Coding Agent'}</p>
-      </div>
-      {result && <div className="result-banner">✨ {result}</div>}
-    </div>
+  const handleSaveFile = async () => {
+    if (!activeFile || !token) return
+    setSaveLoading(true)
+    setSaveFeedback(null)
+    try {
+      const res = await fetch(`${apiBase}/workspace/file`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          project_id: projectId || 'project_default',
+          path: activeFile.path,
+          content: editorContent,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail || 'Failed to save file.')
+      }
+      const data = await res.json()
+      setFileList((prev) =>
+        prev.map((f, i) => (i === activeFileIndex ? { ...f, code: editorContent, status: 'modified', size: data.size } : f))
+      )
+      setSaveFeedback({ type: 'success', message: `Saved directly to workspace disk (${data.size} bytes).` })
+      setIsEditing(false)
+    } catch (err) {
+      setSaveFeedback({ type: 'error', message: err.message })
+    } finally {
+      setSaveLoading(false)
+    }
+  }
 
-    {/* File Tabs */}
-    {files.length > 0 ? (
-      <div className="code-container">
-        <div className="file-tabs">
-          {files.map((file, idx) => {
-            const fileName = file.path.split('/').pop()
-            return (
-              <button key={file.path} className={`file-tab ${idx === activeFileIndex ? 'active' : ''}`} onClick={() => setActiveFileIndex(idx)}>
-                <span className="file-icon">{file.language === 'python' ? '🐍' : file.language === 'javascript' ? '⚛️' : file.language === 'sql' ? '🗄️' : '📄'}</span>
-                <span>{fileName}</span>
-              </button>
-            )
-          })}
+  return (
+    <div className="code-explorer">
+      <div className="code-header-info">
+        <div>
+          <h3>⚡ Generated Source Code Files</h3>
+          <p>{summary || 'Complete software implementation code generated by Coding Agent'}</p>
         </div>
+        {result && <div className="result-banner">✨ {result}</div>}
+      </div>
 
-        {activeFile && (
-          <div className="code-viewer-card">
-            <div className="code-bar">
-              <div className="file-meta">
-                <code>{activeFile.path}</code>
-                <span className="purpose-text">— {activeFile.purpose}</span>
-              </div>
-              <button className="copy-code-btn" onClick={copyCode}>
-                {copied ? '✅ Copied!' : '📋 Copy Code'}
-              </button>
-            </div>
+      {workspaceDir && (
+        <div className="workspace-meta-bar">
+          <span>📁 Project Workspace: <code>{workspaceDir}</code></span>
+          <span><b>{fileList.length}</b> files persisted</span>
+        </div>
+      )}
 
-            <div className="code-scroll-box">
-              <pre className="code-content">
-                <code>
-                  {activeFile.code ? activeFile.code.split('\n').map((line, i) => (
-                    <div key={i} className="code-line">
-                      <span className="line-num">{i + 1}</span>
-                      <span className="line-text">{line}</span>
-                    </div>
-                  )) : 'No source code available.'}
-                </code>
-              </pre>
-            </div>
+      {saveFeedback && (
+        <div className={`save-banner ${saveFeedback.type}`}>
+          {saveFeedback.type === 'success' ? '✅ ' : '❌ '}
+          {saveFeedback.message}
+        </div>
+      )}
+
+      {/* File Tabs */}
+      {fileList.length > 0 ? (
+        <div className="code-container">
+          <div className="file-tabs">
+            {fileList.map((file, idx) => {
+              const fileName = file.path.split('/').pop()
+              const icon = file.language === 'python' ? '🐍' : file.language === 'javascript' ? '⚛️' : file.language === 'sql' ? '🗄️' : file.language === 'html' ? '🌐' : file.language === 'css' ? '🎨' : '📄'
+              return (
+                <button
+                  key={file.path}
+                  className={`file-tab ${idx === activeFileIndex ? 'active' : ''}`}
+                  onClick={() => setActiveFileIndex(idx)}
+                >
+                  <span className="file-icon">{icon}</span>
+                  <span>{fileName}</span>
+                  <span className={`badge-pill ${file.status || 'created'}`}>
+                    {file.status === 'modified' ? 'MOD' : 'NEW'}
+                  </span>
+                </button>
+              )
+            })}
           </div>
-        )}
-      </div>
-    ) : (
-      <p className="empty-state">No source code files generated yet.</p>
-    )}
 
-    {/* Implementation Order */}
-    {order.length > 0 && (
-      <div className="section-block" style={{ marginTop: 24 }}>
-        <h4>🛠️ Build Order & Engineering Blueprint</h4>
-        <div className="roadmap-list">
-          {order.map((item) => (
-            <div key={item.step} className="roadmap-step">
-              <span className="step-num">{item.step}</span>
-              <div>
-                <strong>{item.area}</strong>
-                <p>{item.detail}</p>
+          {activeFile && (
+            <div className="code-viewer-card">
+              <div className="code-bar">
+                <div className="file-meta">
+                  <code>{activeFile.path}</code>
+                  <span className="purpose-text">— {activeFile.purpose}</span>
+                  {activeFile.size && <span className="purpose-text">({activeFile.size} B)</span>}
+                </div>
+                <div className="btn-group">
+                  <button
+                    className={`mode-btn ${!isEditing ? 'active' : ''}`}
+                    onClick={() => setIsEditing(false)}
+                  >
+                    👁️ View
+                  </button>
+                  <button
+                    className={`mode-btn ${isEditing ? 'active' : ''}`}
+                    onClick={() => {
+                      setEditorContent(activeFile.code || '')
+                      setIsEditing(true)
+                    }}
+                  >
+                    ✏️ Edit
+                  </button>
+                  {isEditing && (
+                    <button
+                      className="save-code-btn"
+                      onClick={handleSaveFile}
+                      disabled={saveLoading}
+                    >
+                      {saveLoading ? 'Saving…' : '💾 Save to Workspace'}
+                    </button>
+                  )}
+                  <button className="copy-code-btn" onClick={copyCode}>
+                    {copied ? '✅ Copied!' : '📋 Copy Code'}
+                  </button>
+                </div>
               </div>
+
+              {isEditing ? (
+                <textarea
+                  className="code-editor-textarea"
+                  value={editorContent}
+                  onChange={(e) => setEditorContent(e.target.value)}
+                  placeholder="Edit source code directly..."
+                  spellCheck={false}
+                />
+              ) : (
+                <div className="code-scroll-box">
+                  <pre className="code-content">
+                    <code>
+                      {activeFile.code
+                        ? activeFile.code.split('\n').map((line, i) => (
+                            <div key={i} className="code-line">
+                              <span className="line-num">{i + 1}</span>
+                              <span className="line-text">{line}</span>
+                            </div>
+                          ))
+                        : 'No source code available.'}
+                    </code>
+                  </pre>
+                </div>
+              )}
             </div>
-          ))}
+          )}
         </div>
-      </div>
-    )}
-  </div>
+      ) : (
+        <p className="empty-state">No source code files generated yet.</p>
+      )}
+
+      {/* Implementation Order */}
+      {order.length > 0 && (
+        <div className="section-block" style={{ marginTop: 24 }}>
+          <h4>🛠️ Build Order &amp; Engineering Blueprint</h4>
+          <div className="roadmap-list">
+            {order.map((item) => (
+              <div key={item.step} className="roadmap-step">
+                <span className="step-num">{item.step}</span>
+                <div>
+                  <strong>{item.area}</strong>
+                  <p>{item.detail}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

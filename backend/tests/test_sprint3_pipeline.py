@@ -1,5 +1,11 @@
 import asyncio
+import sys
 import unittest
+from pathlib import Path
+
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from app.agents import GlobalOrchestrator
 from app.agents.base_agent import BaseAgent
@@ -23,6 +29,8 @@ class Sprint3PipelineTests(unittest.TestCase):
         self.assertEqual(result["observer"]["failures_detected"], 0)
         self.assertIn("PIPELINE_COMPLETED", [event["event"] for event in result["events"]])
         saved = asyncio.run(repository.get(result["task"]["id"]))
+        self.assertIsNotNone(saved)
+        assert saved is not None
         self.assertEqual(saved["status"], "completed")
 
     def test_failure_is_observed_and_operations_is_not_started(self):
@@ -38,8 +46,11 @@ class Sprint3PipelineTests(unittest.TestCase):
             ).run_pipeline("Build a failing portal")
         )
 
-
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["observer"]["failures_detected"], 1)
         self.assertEqual(result["observer"]["failed_agents"], ["Build Agent"])
         self.assertNotIn("operations", result["teams"])
+
+
+if __name__ == "__main__":
+    unittest.main()

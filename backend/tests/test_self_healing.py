@@ -1,5 +1,11 @@
 import asyncio
+import sys
 import unittest
+from pathlib import Path
+
+backend_dir = str(Path(__file__).resolve().parent.parent)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
 
 from app.agents.development_supervisor import DevelopmentSupervisor
 from app.agents.healing_agent import SelfHealingAgent
@@ -51,3 +57,7 @@ class SelfHealingSystemTests(unittest.TestCase):
         failures = asyncio.run(repository.list_failure_memory())
         self.assertGreaterEqual(len(failures), 1)
         self.assertEqual(failures[0]["mission_request"], "Build a resilient portal")
+
+
+if __name__ == "__main__":
+    unittest.main()
