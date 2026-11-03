@@ -65,12 +65,12 @@ class WorkspaceManager:
 
     def get_project_dir(self, user_id: str, project_id: str, create: bool = False) -> Path:
         """Resolve the specific project directory for a user, optionally creating it."""
-        if not project_id or not str(project_id).strip():
+        if not project_id or not project_id.strip():
             raise WorkspaceSecurityError("Project identifier cannot be empty.")
-        if "\x00" in str(project_id):
+        if "\x00" in project_id:
             raise WorkspaceSecurityError("Null bytes are not allowed in project identifiers.")
 
-        raw_proj = Path(str(project_id).strip().replace("\\", "/")).name
+        raw_proj = Path(project_id.strip().replace("\\", "/")).name
         if raw_proj in self.FORBIDDEN_FILES or raw_proj.startswith(".env"):
             raise WorkspaceSecurityError(f"Access to '{raw_proj}' is restricted.")
 
@@ -257,11 +257,12 @@ class WorkspaceManager:
             if d.is_dir():
                 file_count = sum(1 for f in d.rglob("*") if f.is_file())
                 stat = d.stat()
+                created_ts = getattr(stat, "st_birthtime", stat.st_mtime)
                 projects.append({
                     "project_id": d.name,
                     "name": d.name.replace("_", " ").title(),
                     "file_count": file_count,
-                    "created_at": datetime.fromtimestamp(stat.st_ctime, UTC).isoformat(),
+                    "created_at": datetime.fromtimestamp(created_ts, UTC).isoformat(),
                     "updated_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
                 })
         return projects
