@@ -45,6 +45,9 @@ class UserSignupRequest(BaseModel):
         clean = v.strip().lower()
         if not re.match(EMAIL_REGEX, clean):
             raise ValueError("Please provide a valid email address (e.g. user@example.com)")
+        domain = clean.split("@")[-1]
+        if domain.startswith("gmail.") and domain != "gmail.com":
+            raise ValueError("Only valid Gmail addresses ending with @gmail.com are allowed")
         return clean
 
     @field_validator("confirm_password")
@@ -67,6 +70,9 @@ class UserLoginRequest(BaseModel):
         clean = v.strip().lower()
         if not re.match(EMAIL_REGEX, clean):
             raise ValueError("Please provide a valid email address")
+        domain = clean.split("@")[-1]
+        if domain.startswith("gmail.") and domain != "gmail.com":
+            raise ValueError("Only valid Gmail addresses ending with @gmail.com are allowed")
         return clean
 
 
