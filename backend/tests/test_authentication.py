@@ -12,7 +12,8 @@ if backend_dir not in sys.path:
 from dotenv import load_dotenv
 
 load_dotenv(Path(backend_dir) / ".env")
-os.environ.setdefault("AUTH_SECRET_KEY", "test-auth-secret-key-12345")
+if not os.environ.get("AUTH_SECRET_KEY", "").strip():
+    os.environ["AUTH_SECRET_KEY"] = "test-auth-secret-key-12345"
 
 from starlette.testclient import TestClient
 from app.auth import decode_access_token, hash_password, verify_password
