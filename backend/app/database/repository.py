@@ -8,12 +8,18 @@ import asyncio
 import sqlite3
 from pathlib import Path
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, List, Protocol
 
 try:
     from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo.errors import DuplicateKeyError
 except ImportError:  # Unit tests and in-memory development do not need MongoDB installed.
     AsyncIOMotorClient = None  # type: ignore[assignment,misc]
+    DuplicateKeyError = None  # type: ignore[assignment,misc]
+
+
+class DuplicateUserError(Exception):
+    """Raised when attempting to create a user with an email that already exists."""
 
 
 class PipelineRepository(Protocol):
@@ -22,11 +28,11 @@ class PipelineRepository(Protocol):
     async def create(self, pipeline: dict[str, Any]) -> dict[str, Any]: ...
     async def update(self, pipeline_id: str, pipeline: dict[str, Any]) -> dict[str, Any]: ...
     async def get(self, pipeline_id: str) -> dict[str, Any] | None: ...
-    async def list(self, limit: int = 20) -> list[dict[str, Any]]: ...
+    async def list(self, limit: int = 20) -> List[dict[str, Any]]: ...
 
     # Self-Healing Failure Memory API
     async def save_failure_memory(self, record: dict[str, Any]) -> dict[str, Any]: ...
-    async def list_failure_memory(self, limit: int = 50) -> list[dict[str, Any]]: ...
+    async def list_failure_memory(self, limit: int = 50) -> List[dict[str, Any]]: ...
     async def find_matching_healing_pattern(self, error_signature: str) -> dict[str, Any] | None: ...
 
     async def close(self) -> None: ...
@@ -39,7 +45,7 @@ class InMemoryPipelineRepository:
 
     def __init__(self) -> None:
         self._pipelines: dict[str, dict[str, Any]] = {}
-        self._failures: list[dict[str, Any]] = []
+        self._failures: List[dict[str, Any]] = []
 
     async def create(self, pipeline: dict[str, Any]) -> dict[str, Any]:
         self._pipelines[pipeline["task"]["id"]] = deepcopy(pipeline)
@@ -53,7 +59,7 @@ class InMemoryPipelineRepository:
         pipeline = self._pipelines.get(pipeline_id)
         return deepcopy(pipeline) if pipeline else None
 
-    async def list(self, limit: int = 20) -> list[dict[str, Any]]:
+    async def list(self, limit: int = 20) -> List[dict[str, Any]]:
         values = sorted(self._pipelines.values(), key=lambda item: item["updated_at"], reverse=True)
         return deepcopy(values[:limit])
 
@@ -63,7 +69,7 @@ class InMemoryPipelineRepository:
         self._failures.insert(0, item)
         return item
 
-    async def list_failure_memory(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_failure_memory(self, limit: int = 50) -> List[dict[str, Any]]:
         return deepcopy(self._failures[:limit])
 
     async def find_matching_healing_pattern(self, error_signature: str) -> dict[str, Any] | None:
@@ -101,7 +107,7 @@ class MongoPipelineRepository:
     async def get(self, pipeline_id: str) -> dict[str, Any] | None:
         return await self.pipelines_coll.find_one({"task.id": pipeline_id}, {"_id": 0})
 
-    async def list(self, limit: int = 20) -> list[dict[str, Any]]:
+    async def list(self, limit: int = 20) -> List[dict[str, Any]]:
         cursor = self.pipelines_coll.find({}, {"_id": 0}).sort("updated_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
@@ -112,7 +118,7 @@ class MongoPipelineRepository:
         item.pop("_id", None)
         return item
 
-    async def list_failure_memory(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_failure_memory(self, limit: int = 50) -> List[dict[str, Any]]:
         cursor = self.failures_coll.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
@@ -154,7 +160,7 @@ class InMemoryUserRepository:
         email = user["email"].strip().lower()
         for existing in self._users.values():
             if existing["email"].lower() == email:
-                raise ValueError("Duplicate email")
+                raise DuplicateUserError("Duplicate email")
         doc = deepcopy(user)
         doc["email"] = email
         self._users[user["id"]] = doc
@@ -208,19 +214,22 @@ class SqliteUserRepository:
     def _create_user_sync(self, user: dict[str, Any]) -> dict[str, Any]:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO users (id, email, full_name, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    user["id"],
-                    user["email"].strip().lower(),
-                    user["full_name"].strip(),
-                    user["password_hash"],
-                    user.get("created_at", datetime.now(UTC).isoformat()),
-                    user.get("updated_at", datetime.now(UTC).isoformat()),
-                ),
-            )
-            conn.commit()
-            return deepcopy(user)
+            try:
+                cursor.execute(
+                    "INSERT INTO users (id, email, full_name, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        user["id"],
+                        user["email"].strip().lower(),
+                        user["full_name"].strip(),
+                        user["password_hash"],
+                        user.get("created_at", datetime.now(UTC).isoformat()),
+                        user.get("updated_at", datetime.now(UTC).isoformat()),
+                    ),
+                )
+                conn.commit()
+                return deepcopy(user)
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
 
     async def get_by_email(self, email: str) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._get_by_email_sync, email)
@@ -279,7 +288,12 @@ class MongoUserRepository:
     async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
         doc = deepcopy(user)
         doc["email"] = doc["email"].strip().lower()
-        await self.users_coll.insert_one(doc)
+        try:
+            await self.users_coll.insert_one(doc)
+        except Exception as exc:
+            if DuplicateKeyError is not None and isinstance(exc, DuplicateKeyError):
+                raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
+            raise
         doc.pop("_id", None)
         return doc
 
