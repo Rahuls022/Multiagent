@@ -14,7 +14,9 @@ from typing import Any
 
 from fastapi import HTTPException, Request, status
 
-AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY", "devops-swarm-secure-auth-secret-key-prod-change-in-env")
+AUTH_SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
+if not AUTH_SECRET_KEY:
+    raise RuntimeError("AUTH_SECRET_KEY environment variable is required")
 DEFAULT_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours
 REMEMBER_ME_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days
 
