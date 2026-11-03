@@ -1,6 +1,7 @@
 """Persistence implementations for swarm pipeline state."""
 
 from .repository import (
+    DuplicateUserError,
     InMemoryPipelineRepository,
     InMemoryUserRepository,
     MongoPipelineRepository,
@@ -13,6 +14,7 @@ from .repository import (
 )
 
 __all__ = [
+    "DuplicateUserError",
     "InMemoryPipelineRepository",
     "InMemoryUserRepository",
     "MongoPipelineRepository",
