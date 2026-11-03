@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
-from app.workspace import WorkspaceManager, get_workspace_manager
+from app.workspace import WorkspaceManager, WorkspaceSecurityError, get_workspace_manager
 
 from .base_agent import BaseAgent
 from .nvidia_client import NvidiaNimClient
@@ -19,7 +20,7 @@ class CodingAgent(BaseAgent):
 
     def __init__(
         self,
-        client: NvidiaNimClient | None = None,
+        client: NvidiaNimClient | Any | None = None,
         workspace_manager: WorkspaceManager | None = None,
     ) -> None:
         self.client = client or NvidiaNimClient()
@@ -68,8 +69,31 @@ class CodingAgent(BaseAgent):
                 llm_result = await self.client.create_json(system_prompt=system_prompt, user_prompt=user_prompt)
                 if isinstance(llm_result, dict):
                     raw_files = llm_result.get("files_to_create") or llm_result.get("files") or []
-                    if isinstance(raw_files, list) and raw_files:
-                        files_to_create = raw_files
+                    if isinstance(raw_files, list):
+                        validated_files: list[dict[str, Any]] = []
+                        for entry in raw_files:
+                            if not isinstance(entry, dict):
+                                continue
+                            path = entry.get("path")
+                            if not isinstance(path, str) or not path.strip():
+                                continue
+                            code = entry.get("code")
+                            if not isinstance(code, str):
+                                code = entry.get("content")
+                            if not isinstance(code, str):
+                                continue
+                            try:
+                                self.workspace_manager.resolve_safe_path(user_id, project_id, path.strip())
+                            except WorkspaceSecurityError:
+                                continue
+
+                            normalized_entry = dict(entry)
+                            normalized_entry["path"] = path.strip()
+                            normalized_entry["code"] = code
+                            validated_files.append(normalized_entry)
+
+                        if validated_files:
+                            files_to_create = validated_files
                     if llm_result.get("summary"):
                         summary = llm_result["summary"]
                     if llm_result.get("implementation_order"):
@@ -102,16 +126,23 @@ class CodingAgent(BaseAgent):
         unchanged_paths: list[str] = []
 
         for item in files_to_create:
-            path = item["path"]
-            code = item["code"]
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            code = item.get("code")
+            if not isinstance(path, str) or not isinstance(code, str):
+                continue
             purpose = item.get("purpose", "Application source file")
 
-            write_result = self.workspace_manager.write_file(
-                user_id=user_id,
-                project_id=project_id,
-                relative_path=path,
-                content=code,
-            )
+            try:
+                write_result = self.workspace_manager.write_file(
+                    user_id=user_id,
+                    project_id=project_id,
+                    relative_path=path,
+                    content=code,
+                )
+            except WorkspaceSecurityError:
+                continue
 
             status = write_result["status"]
             if status == "created":
@@ -205,38 +236,56 @@ class CodingAgent(BaseAgent):
     ) -> dict[str, Any]:
         """Modify a specific file based on the user request while preserving other files."""
         # Find which file to modify
-        target_file = None
+        target_file: str | None = None
         for f in existing_files:
-            file_name = f["path"].split("/")[-1].lower()
-            if file_name in request.lower():
-                target_file = f["path"]
+            file_name = str(f.get("path", "")).split("/")[-1].lower()
+            if file_name and file_name in request.lower():
+                target_file = str(f.get("path", ""))
                 break
 
         if not target_file:
             # Default to modifying App.jsx or main.py if available
             for candidate in ["src/App.jsx", "main.py", "README.md"]:
-                if candidate in [f["path"] for f in existing_files]:
+                if candidate in [f.get("path") for f in existing_files]:
                     target_file = candidate
                     break
 
         if not target_file and existing_files:
-            target_file = existing_files[0]["path"]
+            target_file = str(existing_files[0].get("path", "src/App.jsx"))
+
+        if not target_file:
+            target_file = "src/App.jsx"
 
         # Read existing content
+        file_lang = "plaintext"
         try:
             read_res = self.workspace_manager.read_file(user_id, project_id, target_file)
             existing_code = read_res["content"]
+            file_lang = read_res.get("language", "plaintext")
         except Exception:
             existing_code = f"# Modified for: {request}\n"
 
         # Apply realistic patch
+        clean_req = re.sub(r"\s+", " ", request).strip()
         timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        patch_note = f"\n/* Feature Update: {request} (Applied at {timestamp}) */\n"
-        if target_file.endswith(".py"):
-            patch_note = f"\n# Feature Update: {request} (Applied at {timestamp})\n"
+        ext = Path(target_file).suffix.lower()
+
+        safe_req_block = clean_req.replace("*/", "* /")
+        safe_req_html = clean_req.replace("-->", "-- >")
+
+        if ext == ".json":
+            patch_note = ""
+        elif ext in {".py", ".sh", ".bash", ".yml", ".yaml"}:
+            patch_note = f"\n# Feature Update: {clean_req} (Applied at {timestamp})\n"
+        elif ext == ".sql":
+            patch_note = f"\n-- Feature Update: {clean_req} (Applied at {timestamp})\n"
+        elif ext in {".html", ".xml", ".md", ".markdown"}:
+            patch_note = f"\n<!-- Feature Update: {safe_req_html} (Applied at {timestamp}) -->\n"
+        else:
+            patch_note = f"\n/* Feature Update: {safe_req_block} (Applied at {timestamp}) */\n"
 
         updated_code = existing_code + patch_note
-        if "badge" in request.lower() and "badge" not in existing_code.lower():
+        if "badge" in request.lower() and "badge" not in existing_code.lower() and target_file.endswith((".jsx", ".tsx")):
             updated_code += "\n// Added Cart / Notification Badge Feature\nexport const FeatureBadge = () => <span className=\"badge\">New Feature Active</span>;\n"
 
         return {
@@ -248,7 +297,7 @@ class CodingAgent(BaseAgent):
             "files": [
                 {
                     "path": target_file,
-                    "language": read_res.get("language", "plaintext"),
+                    "language": file_lang,
                     "purpose": f"Modified source file for {request}",
                     "code": updated_code,
                 }
@@ -516,12 +565,15 @@ class CodingAgent(BaseAgent):
             )
 
         readme = f"# {name}\n\nPython application built autonomously by DevOps Swarm.\n\n## Run Tests\n```bash\npytest\n```\n"
+        pytest_ini = "[pytest]\npythonpath = .\ntestpaths = tests\n"
 
         files = [
             {"path": "requirements.txt", "language": "plaintext", "purpose": "Python package dependencies", "code": reqs},
+            {"path": "app/__init__.py", "language": "python", "purpose": "Application package initializer", "code": "\"\"\"Application package.\"\"\"\n"},
             {"path": "app/core.py", "language": "python", "purpose": "Core business logic and service domain", "code": core_py},
             {"path": "main.py", "language": "python", "purpose": "Command line execution entrypoint", "code": main_py},
             {"path": "tests/test_core.py", "language": "python", "purpose": "Automated Pytest test verification", "code": test_py},
+            {"path": "pytest.ini", "language": "ini", "purpose": "Pytest path configuration for root app package", "code": pytest_ini},
             {"path": "README.md", "language": "markdown", "purpose": "Project documentation", "code": readme},
         ]
 
@@ -619,15 +671,25 @@ class CodingAgent(BaseAgent):
             "    assert res.status_code == 200\n"
         )
 
-        readme = f"# {name}\n\nFull-stack enterprise application generated by DevOps Swarm.\n"
+        readme = (
+            f"# {name}\n\n"
+            "Full-stack enterprise application generated by DevOps Swarm.\n\n"
+            "## Run Tests\n"
+            "```bash\n"
+            "pytest\n"
+            "```\n"
+        )
+        pytest_ini = "[pytest]\npythonpath = backend\ntestpaths = tests\n"
 
         files = [
             {"path": "backend/main.py", "language": "python", "purpose": "FastAPI application entrypoint", "code": backend_main},
+            {"path": "backend/app/__init__.py", "language": "python", "purpose": "Backend application package initializer", "code": "\"\"\"Backend application package.\"\"\"\n"},
             {"path": "backend/app/schemas.py", "language": "python", "purpose": "Pydantic contract schemas", "code": backend_schema},
             {"path": "backend/app/routes.py", "language": "python", "purpose": "REST controller routes", "code": backend_router},
             {"path": "database/schema.sql", "language": "sql", "purpose": "Relational DDL table definitions", "code": db_schema},
             {"path": f"frontend/src/{pascal}Workspace.jsx", "language": "javascript", "purpose": "React UI management workspace", "code": frontend_workspace},
             {"path": "tests/test_api.py", "language": "python", "purpose": "Pytest integration tests", "code": tests_py},
+            {"path": "pytest.ini", "language": "ini", "purpose": "Pytest path configuration for backend modules", "code": pytest_ini},
             {"path": "README.md", "language": "markdown", "purpose": "Architecture and setup instructions", "code": readme},
         ]
 
