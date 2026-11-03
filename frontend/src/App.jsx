@@ -56,9 +56,10 @@ function AuthScreen({ onAuthenticated }) {
 
   const trimmedEmail = form.email.trim().toLowerCase()
   const emailHasText = form.email.length > 0
-  const isGmailValid = /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(trimmedEmail)
-  const isGenericEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail) && (!trimmedEmail.includes('@gmail.') || trimmedEmail.endsWith('@gmail.com'))
-  const isEmailValid = mode === 'signup' ? isGmailValid : isGenericEmailValid
+  const emailRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/
+  const isEmailFormatValid = emailRegex.test(trimmedEmail)
+  const isGmailDomainInvalid = trimmedEmail.includes('@gmail.') && !trimmedEmail.endsWith('@gmail.com')
+  const isEmailValid = isEmailFormatValid && !isGmailDomainInvalid
 
   const passwordHasText = form.password.length > 0
   const isPasswordValid = form.password.length >= 8
@@ -77,19 +78,13 @@ function AuthScreen({ onAuthenticated }) {
     setSuccess('')
 
     const cleanEmail = form.email.trim().toLowerCase()
-    if (mode === 'signup') {
-      const isGmail = /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(cleanEmail)
-      if (!isGmail) {
-        return setError('Please enter a valid Gmail address (e.g. alex@gmail.com). Only valid @gmail.com accounts are allowed.')
-      }
-    } else {
-      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
-      if (!emailValid) {
-        return setError('Please enter a valid email address.')
-      }
-      if (cleanEmail.includes('@gmail.') && !cleanEmail.endsWith('@gmail.com')) {
-        return setError('Invalid Gmail domain. Only valid @gmail.com addresses are allowed.')
-      }
+    const emailRegex = /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$/
+    if (!emailRegex.test(cleanEmail)) {
+      return setError('Please enter a valid email address.')
+    }
+    const emailDomain = cleanEmail.split('@')[1] || ''
+    if (emailDomain.startsWith('gmail.') && emailDomain !== 'gmail.com') {
+      return setError('Invalid Gmail domain. Only valid @gmail.com addresses are allowed.')
     }
 
     if (form.password.length < 8) {
@@ -275,12 +270,10 @@ function AuthScreen({ onAuthenticated }) {
                 <span className="input-status-icon">{isEmailValid ? '✓' : '✕'}</span>
                 <span>
                   {isEmailValid
-                    ? (mode === 'signup' ? 'Valid Gmail address' : 'Valid email address')
-                    : (mode === 'signup'
-                        ? 'Invalid email. Only valid @gmail.com accounts are allowed (e.g. alex@gmail.com)'
-                        : (trimmedEmail.includes('@gmail.')
-                            ? 'Invalid Gmail domain. Must be @gmail.com'
-                            : 'Please enter a valid email address'))
+                    ? 'Valid email address'
+                    : (isGmailDomainInvalid
+                        ? 'Invalid Gmail domain. Must be @gmail.com'
+                        : 'Please enter a valid email address')
                   }
                 </span>
               </span>
