@@ -21,7 +21,7 @@ An end-to-end multi-agent autonomous DevOps system featuring specialized AI agen
   - Expiring signed JWT access tokens (`HS256`, 24h default / 30-day "Remember Me" mode) guarding all API endpoints.
 - **Isolated Project Workspaces (`backend/app/workspace.py`)**:
   - Sandboxed directory isolation per user and project (`backend/workspaces/{user_id}/{project_id}/`).
-  - Path traversal and security protections against directory escaping (`../`) and forbidden system files (`.env`, `.git`, `*.db`).
+  - Path traversal and security protections against directory escaping (`../`) and forbidden filenames (`.env`, `.git`, `.gitignore`, `.env.local`, `devops_swarm.db`).
   - Real-time disk file reading, editing, saving, and deletion APIs.
 - **Dual Database Persistence (`backend/app/database/`)**:
   - **Zero-Config SQLite**: Built-in default local database (`devops_swarm.db`), requiring no external dependencies or Docker.
