@@ -5,8 +5,18 @@ from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).with_name(".env"))
+
+import sqlite3
+
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+
+try:
+    from pymongo.errors import DuplicateKeyError
+except ImportError:
+    DuplicateKeyError = None
 
 from app.agents import BaseAgent, DevelopmentSupervisor, GlobalOrchestrator
 from app.auth import (
@@ -16,7 +26,7 @@ from app.auth import (
     hash_password,
     verify_password,
 )
-from app.database import create_pipeline_repository, create_user_repository
+from app.database import DuplicateUserError, create_pipeline_repository, create_user_repository
 from app.schemas import (
     PipelineRequest,
     TokenResponse,
@@ -27,8 +37,6 @@ from app.schemas import (
     WorkspaceGenerateRequest,
 )
 from app.workspace import WorkspaceSecurityError, get_workspace_manager
-
-load_dotenv(Path(__file__).with_name(".env"))
 
 
 class SimulatedFailingBuildAgent(BaseAgent):
@@ -105,12 +113,21 @@ async def signup(payload: UserSignupRequest, request: Request):
         "updated_at": now,
     }
 
+    duplicate_errors: tuple[type[Exception], ...] = (DuplicateUserError, sqlite3.IntegrityError)
+    if DuplicateKeyError is not None:
+        duplicate_errors = (DuplicateUserError, sqlite3.IntegrityError, DuplicateKeyError)
+
     try:
         await user_repo.create_user(user_data)
+    except duplicate_errors as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email address already exists.",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT if "duplicate" in str(exc).lower() else status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An account with this email address already exists." if "duplicate" in str(exc).lower() else "Failed to create user account.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user account.",
         ) from exc
 
     token, expires_in = create_access_token({
@@ -305,12 +322,23 @@ async def create_workspace_project(
     """Create a new project workspace for the user."""
     project_id = payload.get("project_id") or payload.get("name") or "new_project"
     workspace_mgr = get_workspace_manager()
-    project_dir = workspace_mgr.get_project_dir(current_user["id"], project_id)
-    return {
-        "project_id": project_dir.name,
-        "path": str(project_dir),
-        "message": f"Workspace initialized for project '{project_dir.name}'",
-    }
+    try:
+        project_dir = workspace_mgr.get_project_dir(current_user["id"], project_id, create=True)
+        safe_rel_path = None
+        try:
+            safe_rel_path = project_dir.relative_to(workspace_mgr.root_dir).as_posix()
+        except ValueError:
+            safe_rel_path = None
+
+        response: dict[str, Any] = {
+            "project_id": project_dir.name,
+            "message": f"Workspace initialized for project '{project_dir.name}'",
+        }
+        if safe_rel_path is not None:
+            response["path"] = safe_rel_path
+        return response
+    except WorkspaceSecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/workspace/files")
@@ -320,12 +348,15 @@ async def list_workspace_files(
 ):
     """List all real source files in a specific project workspace."""
     workspace_mgr = get_workspace_manager()
-    files = workspace_mgr.list_files(current_user["id"], project_id)
-    return {
-        "project_id": project_id,
-        "total_files": len(files),
-        "files": files,
-    }
+    try:
+        files = workspace_mgr.list_files(current_user["id"], project_id)
+        return {
+            "project_id": project_id,
+            "total_files": len(files),
+            "files": files,
+        }
+    except WorkspaceSecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/workspace/structure")
@@ -335,7 +366,10 @@ async def get_workspace_structure(
 ):
     """Return the hierarchical directory tree of the project workspace."""
     workspace_mgr = get_workspace_manager()
-    return workspace_mgr.get_structure(current_user["id"], project_id)
+    try:
+        return workspace_mgr.get_structure(current_user["id"], project_id)
+    except WorkspaceSecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/workspace/file")
