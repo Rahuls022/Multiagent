@@ -9,6 +9,11 @@ backend_dir = str(Path(__file__).resolve().parent.parent)
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+from dotenv import load_dotenv
+
+load_dotenv(Path(backend_dir) / ".env")
+os.environ.setdefault("AUTH_SECRET_KEY", "test-auth-secret-key-12345")
+
 from starlette.testclient import TestClient
 from app.auth import decode_access_token, hash_password, verify_password
 from app.database import InMemoryPipelineRepository, SqliteUserRepository
@@ -210,6 +215,37 @@ class AuthenticationTestSuite(unittest.TestCase):
         self.assertIsNotNone(user)
         self.assertEqual(user["full_name"], "Test Engineer")
         self.assertTrue(user["password_hash"].startswith("pbkdf2_sha256$"))
+
+    def test_15_duplicate_email_repository_mapping_and_500_preservation(self):
+        """Test 15: create_user duplicate errors map to 409 by type; unrelated errors map to 500."""
+        from unittest.mock import AsyncMock
+        import sqlite3
+        from app.database import DuplicateUserError
+
+        mock_repo = AsyncMock()
+        mock_repo.get_by_email.return_value = None
+        app.state.user_repository = mock_repo
+
+        # Case 1: DuplicateUserError -> 409
+        mock_repo.create_user.side_effect = DuplicateUserError("Already exists")
+        res1 = self.client.post("/api/auth/signup", json={
+            "full_name": "User One", "email": "unique1@swarm.local", "password": "Password123!", "confirm_password": "Password123!"
+        })
+        self.assertEqual(res1.status_code, 409)
+
+        # Case 2: sqlite3.IntegrityError without 'duplicate' text -> 409
+        mock_repo.create_user.side_effect = sqlite3.IntegrityError("UNIQUE constraint failed: users.email")
+        res2 = self.client.post("/api/auth/signup", json={
+            "full_name": "User Two", "email": "unique2@swarm.local", "password": "Password123!", "confirm_password": "Password123!"
+        })
+        self.assertEqual(res2.status_code, 409)
+
+        # Case 3: Unrelated error -> 500
+        mock_repo.create_user.side_effect = OSError("Disk write failed")
+        res3 = self.client.post("/api/auth/signup", json={
+            "full_name": "User Three", "email": "unique3@swarm.local", "password": "Password123!", "confirm_password": "Password123!"
+        })
+        self.assertEqual(res3.status_code, 500)
 
 
 if __name__ == "__main__":
