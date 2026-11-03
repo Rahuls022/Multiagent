@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -214,6 +215,38 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
 
         # Check package.json remains COMPLETELY UNCHANGED
         self.assertEqual(original_pkg_code, package_file.read_text(encoding="utf-8"))
+
+    def test_05_json_file_modification_handling(self):
+        """Test 5: Modifying JSON files applies structured updates when supported, or reports unsupported."""
+        proj_dir = self.workspace_mgr.get_project_dir(self.user_a_id, "ecommerce_react")
+        if not (proj_dir / "package.json").exists():
+            self.test_01_generate_new_react_application()
+
+        package_file = proj_dir / "package.json"
+        agent = CodingAgent(client=StubClient(), workspace_manager=self.workspace_mgr)
+
+        # Case 1: Supported JSON modification (add dependency)
+        task_supported = {
+            "id": "task_json_01",
+            "request": "Modify package.json to add axios dependency",
+            "user_id": self.user_a_id,
+            "project_id": "ecommerce_react",
+        }
+        res_supp = asyncio.run(agent.execute(task_supported, {}))
+        self.assertIn("package.json", res_supp["files_modified"])
+        updated_json = json.loads(package_file.read_text(encoding="utf-8"))
+        self.assertIn("axios", updated_json.get("dependencies", {}))
+
+        # Case 2: Unsupported JSON modification (no structured target, e.g. text comment request)
+        task_unsupported = {
+            "id": "task_json_02",
+            "request": "Modify package.json to add a badge",
+            "user_id": self.user_a_id,
+            "project_id": "ecommerce_react",
+        }
+        res_unsupp = asyncio.run(agent.execute(task_unsupported, {}))
+        self.assertEqual(res_unsupp["files_modified"], [])
+        self.assertIn("Unsupported modification", res_unsupp["user_visible_result"])
 
     def test_06_read_and_update_files_through_api(self):
         """Test 6: User can list, read, and update workspace files via REST endpoints."""
