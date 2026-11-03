@@ -13,10 +13,20 @@ import asyncio
 from starlette.testclient import TestClient
 
 from app.agents.coding_agent import CodingAgent
+from app.agents.nvidia_client import NvidiaNimClient
 from app.agents.planning_agent import PlanningAgent
 from app.database import InMemoryPipelineRepository, SqliteUserRepository
-from app.workspace import WorkspaceManager, WorkspaceSecurityError
+from app.workspace import WorkspaceManager, WorkspaceSecurityError, set_workspace_manager
 from main import app
+
+
+class StubClient(NvidiaNimClient):
+    def __init__(self) -> None:
+        self.api_key = ""
+
+    @property
+    def is_configured(self) -> bool:
+        return False
 
 
 class CodingAgentWorkspaceTestSuite(unittest.TestCase):
@@ -39,7 +49,6 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
                 pass
 
     def setUp(self):
-        from app.workspace import set_workspace_manager
         self.workspace_mgr = WorkspaceManager(root_dir=self.temp_ws_dir)
         set_workspace_manager(self.workspace_mgr)
         self.user_repo = SqliteUserRepository(self.temp_db_path)
@@ -80,7 +89,7 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
 
     def test_01_generate_new_react_application(self):
         """Test 1: Coding Agent generates real React files on disk."""
-        agent = CodingAgent(workspace_manager=self.workspace_mgr)
+        agent = CodingAgent(client=StubClient(), workspace_manager=self.workspace_mgr)
         task = {
             "id": "task_react_01",
             "request": "Build a modern e-commerce website with React",
@@ -115,7 +124,7 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
 
     def test_02_generate_simple_python_application(self):
         """Test 2: Coding Agent generates real Python files on disk."""
-        agent = CodingAgent(workspace_manager=self.workspace_mgr)
+        agent = CodingAgent(client=StubClient(), workspace_manager=self.workspace_mgr)
         task = {
             "id": "task_py_01",
             "request": "Build a simple Python CLI calculator application",
@@ -143,7 +152,7 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
 
     def test_03_generate_project_with_multiple_folders(self):
         """Test 3: Coding Agent scaffolds multi-tier directory hierarchies."""
-        agent = CodingAgent(workspace_manager=self.workspace_mgr)
+        agent = CodingAgent(client=StubClient(), workspace_manager=self.workspace_mgr)
         task = {
             "id": "task_multi_01",
             "request": "Build a student management portal with database and backend",
@@ -179,7 +188,7 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
         original_pkg_code = package_file.read_text(encoding="utf-8")
         original_app_code = app_file.read_text(encoding="utf-8")
 
-        agent = CodingAgent(workspace_manager=self.workspace_mgr)
+        agent = CodingAgent(client=StubClient(), workspace_manager=self.workspace_mgr)
         task = {
             "id": "task_mod_01",
             "request": "Modify src/App.jsx to add a shopping cart badge",
@@ -249,6 +258,10 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
 
     def test_07_persistence_after_backend_restart(self):
         """Test 7: Files remain permanently available across new WorkspaceManager instances."""
+        proj_dir = self.workspace_mgr.get_project_dir(self.user_a_id, "ecommerce_react")
+        if not (proj_dir / "package.json").exists():
+            self.test_01_generate_new_react_application()
+
         new_mgr = WorkspaceManager(root_dir=self.temp_ws_dir)
         files = new_mgr.list_files(self.user_a_id, "ecommerce_react")
         paths = [f["path"] for f in files]
@@ -257,9 +270,7 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
 
     def test_08_user_workspace_isolation(self):
         """Test 8: User B cannot access or modify User A's project files."""
-        app.state.workspace_manager = self.workspace_mgr
-        import main
-        main._workspace_manager_instance = self.workspace_mgr
+        set_workspace_manager(self.workspace_mgr)
 
         # User B tries to read User A's file in User B's workspace context
         # (Since User B doesn't have ecommerce_react, it should return 404)
@@ -279,15 +290,78 @@ class CodingAgentWorkspaceTestSuite(unittest.TestCase):
             self.workspace_mgr.resolve_safe_path(self.user_a_id, "test_proj", ".env")
 
         # API check
-        app.state.workspace_manager = self.workspace_mgr
-        import main
-        main._workspace_manager_instance = self.workspace_mgr
+        set_workspace_manager(self.workspace_mgr)
 
         api_res = self.client.get(
             "/api/workspace/file?project_id=ecommerce_react&path=../../etc/passwd",
             headers={"Authorization": f"Bearer {self.token_a}"},
         )
         self.assertEqual(api_res.status_code, 400)
+
+    def test_10_directory_creation_on_demand(self):
+        """Test 10: Reads, safe path resolution, and listings do not create directories; writes do."""
+        non_existent_proj = "ghost_project"
+        proj_dir = self.workspace_mgr.get_project_dir(self.user_a_id, non_existent_proj)
+        self.assertFalse(proj_dir.exists())
+
+        # resolve_safe_path should not create directory
+        target = self.workspace_mgr.resolve_safe_path(self.user_a_id, non_existent_proj, "test.txt")
+        self.assertFalse(proj_dir.exists())
+
+        # list_files should not create directory
+        files = self.workspace_mgr.list_files(self.user_a_id, non_existent_proj)
+        self.assertEqual(files, [])
+        self.assertFalse(proj_dir.exists())
+
+        # get_structure should not create directory
+        structure = self.workspace_mgr.get_structure(self.user_a_id, non_existent_proj)
+        self.assertEqual(structure["total_files"], 0)
+        self.assertEqual(structure["root"]["children"], [])
+        self.assertFalse(proj_dir.exists())
+
+        # write_file SHOULD create directory
+        self.workspace_mgr.write_file(self.user_a_id, non_existent_proj, "test.txt", "hello")
+        self.assertTrue(proj_dir.exists())
+        self.assertTrue((proj_dir / "test.txt").exists())
+
+    def test_11_project_security_and_non_absolute_path_exposure(self):
+        """Test 11: Workspace project endpoints catch WorkspaceSecurityError and do not expose absolute paths."""
+        set_workspace_manager(self.workspace_mgr)
+
+        # 1. create_workspace_project rejects forbidden project_id
+        res_create_err = self.client.post(
+            "/api/workspace/projects",
+            headers={"Authorization": f"Bearer {self.token_a}"},
+            json={"project_id": ".env"},
+        )
+        self.assertEqual(res_create_err.status_code, 400)
+
+        # 2. create_workspace_project succeeds with valid project_id and returns relative path
+        res_create_ok = self.client.post(
+            "/api/workspace/projects",
+            headers={"Authorization": f"Bearer {self.token_a}"},
+            json={"project_id": "valid_proj"},
+        )
+        self.assertEqual(res_create_ok.status_code, 200)
+        data = res_create_ok.json()
+        self.assertIn("path", data)
+        # Verify path is relative, not exposing absolute drive/filesystem path
+        self.assertFalse(os.path.isabs(data["path"]))
+        self.assertNotIn(":\\", data["path"])
+
+        # 3. list_workspace_files rejects forbidden project_id
+        res_list_err = self.client.get(
+            "/api/workspace/files?project_id=.env",
+            headers={"Authorization": f"Bearer {self.token_a}"},
+        )
+        self.assertEqual(res_list_err.status_code, 400)
+
+        # 4. get_workspace_structure rejects forbidden project_id
+        res_struct_err = self.client.get(
+            "/api/workspace/structure?project_id=.env",
+            headers={"Authorization": f"Bearer {self.token_a}"},
+        )
+        self.assertEqual(res_struct_err.status_code, 400)
 
 
 if __name__ == "__main__":
