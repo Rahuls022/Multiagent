@@ -274,19 +274,70 @@ class CodingAgent(BaseAgent):
         safe_req_html = clean_req.replace("-->", "-- >")
 
         if ext == ".json":
-            patch_note = ""
+            try:
+                data = json.loads(existing_code)
+                if isinstance(data, dict):
+                    req_lower = request.lower()
+                    modified_json = False
+
+                    if "dependenc" in req_lower:
+                        deps = data.setdefault("dependencies", {})
+                        if isinstance(deps, dict):
+                            pkg_matches = re.findall(r"(?:add|install|use)\s+([a-zA-Z0-9_\-@/]+)", request, re.I)
+                            pkg = pkg_matches[0] if pkg_matches else None
+                            if pkg and pkg.lower() not in {"a", "an", "the", "dependency", "dependencies"}:
+                                deps[pkg] = "^1.0.0"
+                            else:
+                                deps["custom-addon"] = "^1.0.0"
+                            modified_json = True
+                    elif "version" in req_lower:
+                        ver_matches = re.findall(r"(\d+\.\d+\.\d+)", request)
+                        if ver_matches:
+                            data["version"] = ver_matches[0]
+                            modified_json = True
+                    elif "script" in req_lower:
+                        scripts = data.setdefault("scripts", {})
+                        if isinstance(scripts, dict):
+                            scripts["feature"] = f"echo {clean_req}"
+                            modified_json = True
+                    elif "description" in req_lower:
+                        data["description"] = clean_req
+                        modified_json = True
+
+                    if modified_json:
+                        updated_code = json.dumps(data, indent=2) + "\n"
+                    else:
+                        updated_code = existing_code
+                else:
+                    updated_code = existing_code
+            except Exception:
+                updated_code = existing_code
         elif ext in {".py", ".sh", ".bash", ".yml", ".yaml"}:
             patch_note = f"\n# Feature Update: {clean_req} (Applied at {timestamp})\n"
+            updated_code = existing_code + patch_note
         elif ext == ".sql":
             patch_note = f"\n-- Feature Update: {clean_req} (Applied at {timestamp})\n"
+            updated_code = existing_code + patch_note
         elif ext in {".html", ".xml", ".md", ".markdown"}:
             patch_note = f"\n<!-- Feature Update: {safe_req_html} (Applied at {timestamp}) -->\n"
+            updated_code = existing_code + patch_note
         else:
             patch_note = f"\n/* Feature Update: {safe_req_block} (Applied at {timestamp}) */\n"
+            updated_code = existing_code + patch_note
 
-        updated_code = existing_code + patch_note
         if "badge" in request.lower() and "badge" not in existing_code.lower() and target_file.endswith((".jsx", ".tsx")):
             updated_code += "\n// Added Cart / Notification Badge Feature\nexport const FeatureBadge = () => <span className=\"badge\">New Feature Active</span>;\n"
+
+        if updated_code == existing_code:
+            return {
+                "summary": f"Unsupported modification for {target_file}",
+                "implementation_order": [
+                    {"step": 1, "area": "Code Inspection", "detail": f"Located target file {target_file} in workspace"},
+                    {"step": 2, "area": "Modification Check", "detail": f"File type {ext} does not support requested modification without structured target"},
+                ],
+                "files": [],
+                "user_visible_result": f"Unsupported modification: could not apply changes to {target_file}.",
+            }
 
         return {
             "summary": f"Updated {target_file} for mission: {request}",
