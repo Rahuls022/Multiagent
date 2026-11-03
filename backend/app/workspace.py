@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -257,7 +258,12 @@ class WorkspaceManager:
             if d.is_dir():
                 file_count = sum(1 for f in d.rglob("*") if f.is_file())
                 stat = d.stat()
-                created_ts = getattr(stat, "st_birthtime", stat.st_mtime)
+                if hasattr(stat, "st_birthtime"):
+                    created_ts = stat.st_birthtime
+                elif (sys.platform == "win32" or os.name == "nt") and sys.version_info < (3, 12):
+                    created_ts = getattr(stat, "st_ctime", stat.st_mtime)
+                else:
+                    created_ts = stat.st_mtime
                 projects.append({
                     "project_id": d.name,
                     "name": d.name.replace("_", " ").title(),
