@@ -25,6 +25,8 @@ if not already_running:
     print("Starting local backend server with uvicorn on port 8000...")
     env = os.environ.copy()
     env["PYTHONPATH"] = backend_dir
+    if not env.get("AUTH_SECRET_KEY", "").strip():
+        env["AUTH_SECRET_KEY"] = "verify-auth-test-secret-key-12345"
 
     proc = subprocess.Popen(
         [python_exe, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000"],
