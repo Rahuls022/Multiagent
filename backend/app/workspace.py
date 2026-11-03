@@ -55,22 +55,43 @@ class WorkspaceManager:
 
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_user_dir(self, user_id: str) -> Path:
-        """Get the base workspace directory for a user."""
+    def get_user_dir(self, user_id: str, create: bool = False) -> Path:
+        """Get the base workspace directory for a user, optionally creating it."""
         safe_user = sanitize_identifier(user_id)
         user_dir = (self.root_dir / safe_user).resolve()
-        user_dir.mkdir(parents=True, exist_ok=True)
+        if create:
+            user_dir.mkdir(parents=True, exist_ok=True)
         return user_dir
 
-    def get_project_dir(self, user_id: str, project_id: str) -> Path:
-        """Get or create the specific project directory for a user."""
+    def get_project_dir(self, user_id: str, project_id: str, create: bool = False) -> Path:
+        """Resolve the specific project directory for a user, optionally creating it."""
+        if not project_id or not str(project_id).strip():
+            raise WorkspaceSecurityError("Project identifier cannot be empty.")
+        if "\x00" in str(project_id):
+            raise WorkspaceSecurityError("Null bytes are not allowed in project identifiers.")
+
+        raw_proj = Path(str(project_id).strip().replace("\\", "/")).name
+        if raw_proj in self.FORBIDDEN_FILES or raw_proj.startswith(".env"):
+            raise WorkspaceSecurityError(f"Access to '{raw_proj}' is restricted.")
+
         safe_proj = sanitize_identifier(project_id)
-        user_dir = self.get_user_dir(user_id)
+        if safe_proj in self.FORBIDDEN_FILES or safe_proj.startswith(".env"):
+            raise WorkspaceSecurityError(f"Access to '{safe_proj}' is restricted.")
+
+        user_dir = self.get_user_dir(user_id, create=create)
         project_dir = (user_dir / safe_proj).resolve()
-        project_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            project_dir.relative_to(user_dir)
+        except ValueError as exc:
+            raise WorkspaceSecurityError(f"Path traversal detected in project '{project_id}'.") from exc
+
+        if create:
+            project_dir.mkdir(parents=True, exist_ok=True)
         return project_dir
 
-    def resolve_safe_path(self, user_id: str, project_id: str, relative_path: str) -> Path:
+    def resolve_safe_path(
+        self, user_id: str, project_id: str, relative_path: str, create: bool = False
+    ) -> Path:
         """Validate and resolve a file path inside the project workspace.
         
         Prevents path traversal, absolute path injection, and access to protected files.
@@ -90,7 +111,7 @@ class WorkspaceManager:
         if file_name in self.FORBIDDEN_FILES or file_name.startswith(".env"):
             raise WorkspaceSecurityError(f"Access to '{file_name}' is restricted.")
 
-        project_dir = self.get_project_dir(user_id, project_id)
+        project_dir = self.get_project_dir(user_id, project_id, create=create)
         target_path = (project_dir / clean_rel).resolve()
 
         # Enforce that the target stays strictly inside project_dir
@@ -107,7 +128,7 @@ class WorkspaceManager:
         self, user_id: str, project_id: str, relative_path: str, content: str
     ) -> dict[str, Any]:
         """Write content to a file in the project workspace, tracking whether created or modified."""
-        target_path = self.resolve_safe_path(user_id, project_id, relative_path)
+        target_path = self.resolve_safe_path(user_id, project_id, relative_path, create=True)
         is_new = not target_path.exists()
 
         old_content = ""
@@ -186,6 +207,18 @@ class WorkspaceManager:
         project_dir = self.get_project_dir(user_id, project_id)
         safe_proj = sanitize_identifier(project_id)
 
+        if not project_dir.exists():
+            return {
+                "project_id": safe_proj,
+                "root": {
+                    "name": project_dir.name,
+                    "path": "/",
+                    "type": "directory",
+                    "children": [],
+                },
+                "total_files": 0,
+            }
+
         def build_tree(current_dir: Path) -> dict[str, Any]:
             children = []
             for item in sorted(current_dir.iterdir(), key=lambda p: (p.is_file(), p.name.lower())):
@@ -217,6 +250,8 @@ class WorkspaceManager:
     def list_projects(self, user_id: str) -> list[dict[str, Any]]:
         """List all projects created by a user."""
         user_dir = self.get_user_dir(user_id)
+        if not user_dir.exists():
+            return []
         projects = []
         for d in sorted(user_dir.iterdir()):
             if d.is_dir():
