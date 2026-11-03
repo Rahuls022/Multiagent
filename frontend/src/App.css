@@ -720,14 +720,109 @@
 
 
 /* Authentication Page Enhancements */
+.email-input-wrapper,
+.validated-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.email-input-wrapper input,
+.validated-input-wrapper input {
+  width: 100%;
+  padding-right: 42px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.email-input-wrapper input.email-valid,
+.email-input-wrapper input.input-valid,
+.validated-input-wrapper input.input-valid,
+.password-input-wrapper input.input-valid {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.25) !important;
+}
+
+.email-input-wrapper input.email-invalid,
+.email-input-wrapper input.input-invalid,
+.validated-input-wrapper input.input-invalid,
+.password-input-wrapper input.input-invalid {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25) !important;
+}
+
+.email-validation-badge,
+.input-validation-badge {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: all 0.15s ease;
+}
+
+.password-validation-mark {
+  right: 44px !important;
+}
+
+.email-validation-badge.valid,
+.input-validation-badge.valid {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1.5px solid #10b981;
+}
+
+.email-validation-badge.invalid,
+.input-validation-badge.invalid {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1.5px solid #ef4444;
+}
+
+.email-status-msg,
+.input-status-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  margin-top: 5px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.email-status-msg.valid,
+.input-status-msg.valid {
+  color: #10b981;
+}
+
+.email-status-msg.invalid,
+.input-status-msg.invalid {
+  color: #ef4444;
+}
+
+.email-status-icon,
+.input-status-icon {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
 .password-input-wrapper {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 }
 
 .password-input-wrapper input {
-  padding-right: 42px;
+  width: 100%;
+  padding-right: 76px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .password-toggle-btn {
