@@ -21,6 +21,27 @@ function EyeIcon({ visible }) {
   )
 }
 
+function ValidationMark({ valid, className = '' }) {
+  return (
+    <span
+      className={`input-validation-badge ${valid ? 'valid' : 'invalid'} ${className}`}
+      title={valid ? 'Valid entry' : 'Invalid entry'}
+      aria-label={valid ? 'Valid entry' : 'Invalid entry'}
+    >
+      {valid ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      )}
+    </span>
+  )
+}
+
 function AuthScreen({ onAuthenticated }) {
   const [mode, setMode] = useState('signin')
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', rememberMe: true })
@@ -29,6 +50,21 @@ function AuthScreen({ onAuthenticated }) {
   const [submitting, setSubmitting] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+
+  const nameHasText = form.name.length > 0
+  const isNameValid = form.name.trim().length >= 2
+
+  const trimmedEmail = form.email.trim().toLowerCase()
+  const emailHasText = form.email.length > 0
+  const isGmailValid = /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(trimmedEmail)
+  const isGenericEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail) && (!trimmedEmail.includes('@gmail.') || trimmedEmail.endsWith('@gmail.com'))
+  const isEmailValid = mode === 'signup' ? isGmailValid : isGenericEmailValid
+
+  const passwordHasText = form.password.length > 0
+  const isPasswordValid = form.password.length >= 8
+
+  const confirmPasswordHasText = form.confirmPassword.length > 0
+  const isConfirmPasswordValid = form.confirmPassword.length >= 8 && form.confirmPassword === form.password
 
   const update = (key) => (event) => {
     setForm({ ...form, [key]: event.target.value })
@@ -41,9 +77,19 @@ function AuthScreen({ onAuthenticated }) {
     setSuccess('')
 
     const cleanEmail = form.email.trim().toLowerCase()
-    const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
-    if (!emailValid) {
-      return setError('Please enter a valid email address (e.g. operator@example.com).')
+    if (mode === 'signup') {
+      const isGmail = /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(cleanEmail)
+      if (!isGmail) {
+        return setError('Please enter a valid Gmail address (e.g. alex@gmail.com). Only valid @gmail.com accounts are allowed.')
+      }
+    } else {
+      const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
+      if (!emailValid) {
+        return setError('Please enter a valid email address.')
+      }
+      if (cleanEmail.includes('@gmail.') && !cleanEmail.endsWith('@gmail.com')) {
+        return setError('Invalid Gmail domain. Only valid @gmail.com addresses are allowed.')
+      }
     }
 
     if (form.password.length < 8) {
@@ -187,29 +233,58 @@ function AuthScreen({ onAuthenticated }) {
           {mode === 'signup' && (
             <label>
               Full name
-              <input
-                value={form.name}
-                onChange={update('name')}
-                placeholder="Alex Morgan"
-                required
-                minLength="2"
-                autoComplete="name"
-                disabled={submitting}
-              />
+              <div className="validated-input-wrapper">
+                <input
+                  value={form.name}
+                  onChange={update('name')}
+                  placeholder="Alex Morgan"
+                  required
+                  minLength="2"
+                  autoComplete="name"
+                  disabled={submitting}
+                  className={nameHasText ? (isNameValid ? 'input-valid' : 'input-invalid') : ''}
+                />
+                {nameHasText && <ValidationMark valid={isNameValid} />}
+              </div>
+              {nameHasText && (
+                <span className={`input-status-msg ${isNameValid ? 'valid' : 'invalid'}`}>
+                  <span className="input-status-icon">{isNameValid ? '✓' : '✕'}</span>
+                  <span>{isNameValid ? 'Valid full name' : 'Full name must be at least 2 characters'}</span>
+                </span>
+              )}
             </label>
           )}
 
           <label>
             Email address
-            <input
-              type="email"
-              value={form.email}
-              onChange={update('email')}
-              placeholder="you@example.com"
-              required
-              autoComplete="email"
-              disabled={submitting}
-            />
+            <div className="validated-input-wrapper">
+              <input
+                type="email"
+                value={form.email}
+                onChange={update('email')}
+                placeholder={mode === 'signup' ? 'alex@gmail.com' : 'you@example.com'}
+                required
+                autoComplete="email"
+                disabled={submitting}
+                className={emailHasText ? (isEmailValid ? 'input-valid' : 'input-invalid') : ''}
+              />
+              {emailHasText && <ValidationMark valid={isEmailValid} />}
+            </div>
+            {emailHasText && (
+              <span className={`input-status-msg ${isEmailValid ? 'valid' : 'invalid'}`}>
+                <span className="input-status-icon">{isEmailValid ? '✓' : '✕'}</span>
+                <span>
+                  {isEmailValid
+                    ? (mode === 'signup' ? 'Valid Gmail address' : 'Valid email address')
+                    : (mode === 'signup'
+                        ? 'Invalid email. Only valid @gmail.com accounts are allowed (e.g. alex@gmail.com)'
+                        : (trimmedEmail.includes('@gmail.')
+                            ? 'Invalid Gmail domain. Must be @gmail.com'
+                            : 'Please enter a valid email address'))
+                  }
+                </span>
+              </span>
+            )}
           </label>
 
           <label>
@@ -224,7 +299,9 @@ function AuthScreen({ onAuthenticated }) {
                 minLength="8"
                 autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                 disabled={submitting}
+                className={passwordHasText ? (isPasswordValid ? 'input-valid' : 'input-invalid') : ''}
               />
+              {passwordHasText && <ValidationMark valid={isPasswordValid} className="password-validation-mark" />}
               <button
                 type="button"
                 className="password-toggle-btn"
@@ -236,6 +313,16 @@ function AuthScreen({ onAuthenticated }) {
                 <EyeIcon visible={showPassword} />
               </button>
             </div>
+            {passwordHasText && (
+              <span className={`input-status-msg ${isPasswordValid ? 'valid' : 'invalid'}`}>
+                <span className="input-status-icon">{isPasswordValid ? '✓' : '✕'}</span>
+                <span>
+                  {isPasswordValid
+                    ? (mode === 'signup' ? 'Password meets requirements (8+ characters)' : 'Valid password length')
+                    : 'Password must contain at least 8 characters'}
+                </span>
+              </span>
+            )}
           </label>
 
           {mode === 'signup' && (
@@ -251,7 +338,9 @@ function AuthScreen({ onAuthenticated }) {
                   minLength="8"
                   autoComplete="new-password"
                   disabled={submitting}
+                  className={confirmPasswordHasText ? (isConfirmPasswordValid ? 'input-valid' : 'input-invalid') : ''}
                 />
+                {confirmPasswordHasText && <ValidationMark valid={isConfirmPasswordValid} className="password-validation-mark" />}
                 <button
                   type="button"
                   className="password-toggle-btn"
@@ -263,6 +352,18 @@ function AuthScreen({ onAuthenticated }) {
                   <EyeIcon visible={showConfirmPassword} />
                 </button>
               </div>
+              {confirmPasswordHasText && (
+                <span className={`input-status-msg ${isConfirmPasswordValid ? 'valid' : 'invalid'}`}>
+                  <span className="input-status-icon">{isConfirmPasswordValid ? '✓' : '✕'}</span>
+                  <span>
+                    {isConfirmPasswordValid
+                      ? 'Passwords match'
+                      : (form.confirmPassword.length < 8
+                          ? 'Must be at least 8 characters'
+                          : 'Passwords do not match')}
+                  </span>
+                </span>
+              )}
             </label>
           )}
 
@@ -1059,6 +1160,7 @@ function CodeExplorer({ files = [], summary, _planUsed, order = [], result, proj
   }, [files])
 
   const activeFile = fileList[activeFileIndex] || fileList[0]
+  const activeFilePath = activeFile?.path
 
   useEffect(() => {
     if (activeFile) {
@@ -1066,7 +1168,8 @@ function CodeExplorer({ files = [], summary, _planUsed, order = [], result, proj
       setIsEditing(false)
       setSaveFeedback(null)
     }
-  }, [activeFile])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilePath])
 
   const copyCode = () => {
     const textToCopy = isEditing ? editorContent : (activeFile?.code || '')
