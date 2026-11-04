@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { LovablePreviewWorkbench } from './components/LovablePreviewWorkbench.jsx'
+import SettingsConsole from './components/SettingsConsole.jsx'
+import PageHeader from './components/PageHeader.jsx'
+import { DEFAULT_SETTINGS } from './settingsConfig.js'
+
 
 const apiBase = '/api'
 const developmentAgents = ['Planning Agent', 'Coding Agent', 'Build Agent', 'Testing Agent']
@@ -183,90 +187,7 @@ function AuthScreen({ onAuthenticated }) {
   </main>
 }
 
-const DEFAULT_SETTINGS = {
-  theme: 'swarm',
-  autonomous: {
-    autonomousMode: true,
-    autonomyLevel: 'full', // 'full', 'supervised', 'manual'
-    autoHealing: true,
-    autoRetryFailedJobs: true,
-    requireHumanApproval: false,
-    maxRemediationAttempts: 3,
-    rollbackOnFailedFix: true,
-  },
-  safety: {
-    approvalBeforeProduction: true,
-    approvalBeforeDatabase: true,
-    approvalBeforeInfra: true,
-    protectedEnvironments: { production: true, staging: false, development: false },
-    riskPolicy: 'medium', // 'low', 'medium', 'high'
-  },
-  selfHealing: {
-    autoDiagnosis: true,
-    autoRemediation: true,
-    runHealthChecks: true,
-    detectionInterval: '30s',
-    verifyAfterFix: true,
-    rollbackIfVerifyFails: true,
-  },
-  buildTesting: {
-    astCompilation: true,
-    unitTests: true,
-    integrationTests: true,
-    securityChecks: true,
-    dependencyChecks: true,
-    qualityGates: true,
-    minSuccessRate: 90,
-    blockDeploymentOnFail: true,
-  },
-  notifications: {
-    pipelineFailures: true,
-    selfHealingActions: true,
-    deploymentFailures: true,
-    criticalErrors: true,
-    agentFailures: true,
-    databaseFailures: true,
-    channel: 'dashboard', // 'dashboard', 'email', 'slack', 'webhook'
-    emailAddress: 'devops-alerts@organization.com',
-    slackChannel: '#devops-swarm-alerts',
-    webhookUrl: 'https://api.internal.devops/hooks/swarm',
-    alertSeverity: 'critical', // 'info', 'warning', 'critical'
-  },
-  agentConfig: {
-    maxActiveAgents: 6,
-    executionTimeout: '5m',
-    maxParallelTasks: 3,
-    agentHealthMonitoring: true,
-    autoAgentRestart: true,
-    agentFailureRecovery: true,
-  },
-  resourceLimits: {
-    cpuLimit: 80,
-    memoryLimit: 4,
-    maxConcurrentJobs: 5,
-    executionTimeoutMinutes: 10,
-  },
-  integrations: {
-    github: { connected: true, repo: 'autonomous-devops-swarm', branch: 'main' },
-    docker: { connected: true, registry: 'docker.io/swarm-ci' },
-    kubernetes: { connected: false, cluster: 'k8s-prod-cluster-01' },
-    jenkins: { connected: false, server: 'https://ci.devops.internal' },
-    slack: { connected: false, channel: '#devops-swarm' },
-    webhook: { connected: true, endpoint: 'https://api.internal.devops/hooks/swarm' },
-  },
-  secrets: {
-    githubToken: 'ghp_a8f9c2d1e4b5g7h9j0k2m4n6p8r0t2v4',
-    dockerKey: 'dckr_pat_9x8w7v6u5t4s3r2q1p0o9n8m7',
-    webhookSecret: 'whsec_5k4j3h2g1f0e9d8c7b6a5',
-  },
-  audit: {
-    recordAgentActions: true,
-    recordSelfHealing: true,
-    recordConfigChanges: true,
-    recordDeployments: true,
-    retentionDays: '30 days',
-  },
-}
+// DEFAULT_SETTINGS is imported from ./settingsConfig.js
 
 function App() {
   const [user, setUser] = useState(() => {
@@ -278,6 +199,84 @@ function App() {
     }
   })
   const [token, setToken] = useState(() => localStorage.getItem('swarm-token'))
+const [themeMode, setThemeMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('swarm-theme')
+      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved
+    } catch {}
+    return 'dark'
+  })
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const userMenuRef = useRef(null)
+
+  // Apply theme to document and body
+  useEffect(() => {
+    const applyTheme = () => {
+      let resolved = themeMode
+      if (themeMode === 'system') {
+        resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      }
+      document.documentElement.setAttribute('data-theme', resolved)
+      document.body.setAttribute('data-theme', resolved)
+    }
+
+    applyTheme()
+    try {
+      localStorage.setItem('swarm-theme', themeMode)
+    } catch {}
+
+    if (themeMode === 'system' && window.matchMedia) {
+      const media = window.matchMedia('(prefers-color-scheme: dark)')
+      const listener = () => applyTheme()
+      media.addEventListener('change', listener)
+      return () => media.removeEventListener('change', listener)
+    }
+  }, [themeMode])
+
+  // Close profile dropdown on outside click or Escape
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setProfileDropdownOpen(false)
+      }
+    }
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setProfileDropdownOpen(false)
+        setProfileModalOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
+
+  // Refresh profile from /api/auth/me if token exists
+  useEffect(() => {
+    if (token) {
+      fetch('/api/auth/me', {
+          headers: { "Authorization": "Bearer " + token }
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(me => {
+          if (me && me.id) {
+            setUser(prev => {
+              const updated = { ...(prev || {}), ...me }
+              try {
+                localStorage.setItem('swarm-user', JSON.stringify(updated))
+              } catch {}
+              return updated
+            })
+          }
+        })
+        .catch(() => {})
+    }
+  }, [token])
+
   const [page, setPage] = useState('dashboard')
   const [request, setRequest] = useState('Build a student management portal')
   const [showMissionConfig, setShowMissionConfig] = useState(false)
@@ -301,6 +300,83 @@ function App() {
   const [healingSimulating, setHealingSimulating] = useState(false)
   const [logLevel, setLogLevel] = useState('all')
   const [clearedLogs, setClearedLogs] = useState(false)
+  // Synchronize settings with backend on mount
+  useEffect(() => {
+    fetch(`${apiBase}/settings`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && typeof data === 'object') {
+          setSettings(prev => ({
+            ...DEFAULT_SETTINGS,
+            ...prev,
+            ...data,
+          }))
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+const handleSaveSettings = async (newSettings) => {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { "Authorization": "Bearer " + token } : {})
+      },
+      body: JSON.stringify({ settings: newSettings })
+    })
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      throw new Error(errData.detail || ("Server returned " + res.status + ": " + res.statusText))
+    }
+    const saved = await res.json()
+    const merged = { ...newSettings, ...saved }
+    setSettings(merged)
+    try {
+      localStorage.setItem('swarm-devops-settings', JSON.stringify(merged))
+    } catch {}
+    return merged
+  }
+
+  const handleResetSettings = async () => {
+    const res = await fetch('/api/settings/reset', {
+      method: 'POST',
+      headers: {
+        ...(token ? { "Authorization": "Bearer " + token } : {})
+      }
+    })
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      throw new Error(errData.detail || ("Server returned " + res.status + ": " + res.statusText))
+    }
+    const defaults = await res.json()
+    const merged = { ...DEFAULT_SETTINGS, ...defaults }
+    setSettings(merged)
+    try {
+      localStorage.setItem('swarm-devops-settings', JSON.stringify(merged))
+    } catch {}
+    return merged
+  }
+
+  const handleSignOut = async () => {
+    try {
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { "Authorization": "Bearer " + token }
+        })
+      }
+    } catch {}
+    try {
+      localStorage.removeItem('swarm-token')
+      localStorage.removeItem('swarm-user')
+    } catch {}
+    setUser(null)
+    setToken(null)
+    setProfileDropdownOpen(false)
+    setProfileModalOpen(false)
+  }
+
   const [settings, setSettings] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('swarm-devops-settings') || localStorage.getItem('swarm-settings') || '{}')
@@ -336,7 +412,7 @@ function App() {
       ...(options.headers || {}),
     }
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers['Authorization'] = 'Bearer ' + token
     }
     const res = await fetch(url, { ...options, headers })
     if (res.status === 401) {
@@ -454,9 +530,35 @@ function App() {
       ]
     })
     try { 
-      const response = await authFetch(`${apiBase}/pipelines`, { 
-        method: 'POST', 
-        body: JSON.stringify({ request, user_id: user?.id }) 
+      // Connect active swarm settings into backend pipeline request
+      const shouldRequireApproval = Boolean(
+        settings.autonomous?.requireHumanApproval ||
+        settings.safety?.approvalBeforeProduction ||
+        requireApproval
+      )
+      const targetEnv = deploymentTarget || (settings.safety?.protectedEnvironments?.production ? 'development' : 'staging')
+      const testingSpecs = settings.buildTesting?.qualityGates
+        ? [`Quality Gate: ${settings.buildTesting.minSuccessRate || 85}% minimum test coverage`, ...(testingRequirements ? [testingRequirements] : [])]
+        : (testingRequirements ? [testingRequirements] : [])
+
+      const response = await authFetch(`${apiBase}/pipelines`, {
+        method: 'POST',
+        body: JSON.stringify({
+          request,
+          user_id: user?.id,
+          require_approval: shouldRequireApproval,
+          deployment_target: targetEnv,
+          testing_requirements: testingSpecs.length > 0 ? testingSpecs : undefined,
+          language: language || 'python',
+          framework: framework || 'fastapi',
+          build_and_deployment_preferences: {
+            ast_validation: Boolean(settings.buildTesting?.astCompilation),
+            min_test_gate: settings.buildTesting?.minSuccessRate || 85,
+            auto_rollback: Boolean(settings.autonomous?.rollbackOnFailedFix),
+            max_remediation_attempts: settings.autonomous?.maxRemediationAttempts || 2,
+            risk_policy: settings.safety?.riskPolicy || 'medium',
+          },
+        })
       })
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}))
@@ -578,67 +680,156 @@ function App() {
 
     <section className="workspace">
       <header className="topbar">
-        <div className="topbar-brand-row">
-          <div className="brand-icon-box">✦</div>
-          <div>
-            <p className="eyebrow" style={{ margin: 0 }}>{page === 'preview' ? 'WEBSITE VIEWER & WORKBENCH' : page.toUpperCase()}</p>
-            <h1>{page === 'dashboard' ? 'Autonomous Mission Control' : page === 'preview' ? 'Live Generated Website Preview & Workbench' : page === 'healing' ? 'Self-Healing & DB Failure Memory' : page[0].toUpperCase() + page.slice(1)}</h1>
+        <div className="topbar-left">
+          <div className="topbar-breadcrumbs">
+            <span className="crumb-root">DevOps Swarm</span>
+            <span className="crumb-sep">/</span>
+            <span className="crumb-page">
+              {page === 'dashboard' ? 'Dashboard' : page === 'healing' ? 'Self-Healing' : page === 'preview' ? 'Website Viewer & Workbench' : page[0].toUpperCase() + page.slice(1)}
+            </span>
           </div>
+          <span className="system-status-indicator">
+            <span className="status-dot-pulse" />
+            Swarm Engine Online
+          </span>
         </div>
-        <div className="user-menu">
-          <span className="avatar">{userDisplayName[0]?.toUpperCase()}</span>
-          <div>
-            <strong>{userDisplayName}</strong>
-            <small>{user.email || 'Protected Operator'}</small>
-          </div>
-          <button title="Sign out" className="signout" onClick={async () => {
-            if (token) {
-              try {
-                await fetch(`${apiBase}/auth/logout`, {
-                  method: 'POST',
-                  headers: { 'Authorization': `Bearer ${token}` }
-                })
-              } catch {}
-            }
-            localStorage.removeItem('swarm-token')
-            localStorage.removeItem('swarm-user')
-            setUser(null)
-            setToken(null)
-          }}>Sign out</button>
+        <div className="user-profile-wrapper" ref={userMenuRef}>
+          <button
+            type="button"
+            className={`user-profile-button ${profileDropdownOpen ? 'active' : ''}`}
+            onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+            title="Account and profile settings"
+            aria-haspopup="true"
+            aria-expanded={profileDropdownOpen}
+          >
+            <span className="user-avatar-circle">
+              {userDisplayName[0]?.toUpperCase() || 'R'}
+            </span>
+            <div className="user-button-meta">
+              <span className="user-button-name">{userDisplayName}</span>
+              <span className="user-button-role">{user.role || 'DevOps Lead'}</span>
+            </div>
+            <span className="user-dropdown-caret">▼</span>
+          </button>
+
+          {profileDropdownOpen && (
+            <div className="user-dropdown-menu" role="menu">
+              <div className="user-dropdown-header">
+                <span className="user-dropdown-header-avatar">
+                  {userDisplayName[0]?.toUpperCase() || 'R'}
+                </span>
+                <div className="user-dropdown-user-info">
+                  <p className="user-dropdown-user-name">{userDisplayName}</p>
+                  <p className="user-dropdown-user-email">{user.email || 'operator@swarm.dev'}</p>
+                  <span className="user-dropdown-role-badge">{user.role || 'DevOps Lead'}</span>
+                </div>
+              </div>
+
+              {/* Theme Switcher in Dropdown */}
+              <div className="user-dropdown-theme-bar">
+                <span className="user-dropdown-section-title">Appearance</span>
+                <div className="user-dropdown-theme-group">
+                  <button
+                    type="button"
+                    className={`user-dropdown-theme-btn ${themeMode === 'light' ? 'active' : ''}`}
+                    onClick={() => setThemeMode('light')}
+                  >
+                    ☀️ Light
+                  </button>
+                  <button
+                    type="button"
+                    className={`user-dropdown-theme-btn ${themeMode === 'dark' ? 'active' : ''}`}
+                    onClick={() => setThemeMode('dark')}
+                  >
+                    🌙 Dark
+                  </button>
+                  <button
+                    type="button"
+                    className={`user-dropdown-theme-btn ${themeMode === 'system' ? 'active' : ''}`}
+                    onClick={() => setThemeMode('system')}
+                  >
+                    💻 System
+                  </button>
+                </div>
+              </div>
+
+              <div className="user-dropdown-items">
+                <button
+                  type="button"
+                  className="user-dropdown-item"
+                  onClick={() => {
+                    setProfileDropdownOpen(false)
+                    setProfileModalOpen(true)
+                  }}
+                >
+                  <span className="user-dropdown-item-icon">👤</span>
+                  Profile Details & Account
+                </button>
+
+                <button
+                  type="button"
+                  className="user-dropdown-item"
+                  onClick={() => {
+                    setProfileDropdownOpen(false)
+                    setPage('settings')
+                  }}
+                >
+                  <span className="user-dropdown-item-icon">⚙️</span>
+                  DevOps Settings
+                </button>
+
+                <div className="user-dropdown-divider" />
+
+                <button
+                  type="button"
+                  className="user-dropdown-item danger"
+                  onClick={handleSignOut}
+                >
+                  <span className="user-dropdown-item-icon">🚪</span>
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
       {page === 'dashboard' && <>
-        <section className="command-card">
-          <div className="command-card-header">
-            <div>
-              <p className="section-label">AI COMMAND PROMPT</p>
-              <h2>Launch a delivery mission</h2>
-              <p className="command-subtitle">Decompose architectures, generate verified code, run tests, and monitor self-healing releases.</p>
-            </div>
+        <PageHeader
+          category="AUTONOMOUS DEVOPS SWARM"
+          title="Mission Control Dashboard"
+          subtitle="Launch autonomous delivery missions, monitor 8-agent swarm collaboration, and inspect pipeline stages."
+          badge={{ label: 'Swarm Active (8 Agents)', variant: 'completed' }}
+          actions={
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <span className="badge">📋 8-Agent Swarm</span>
               <span className="badge">🛡️ DevSecOps Guard</span>
               <button 
                 type="button" 
-                className="mission-config-toggle" 
+                className="secondary-button" 
                 onClick={() => setShowMissionConfig(!showMissionConfig)}
               >
                 ⚙️ {showMissionConfig ? 'Hide Specifications' : 'Mission Specifications'}
               </button>
             </div>
-          </div>
-          <form onSubmit={runPipeline} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div style={{ display: 'flex', gap: '10px' }}>
+          }
+        />
+        <section className="command-card mission-launcher-card">
+          <form className="mission-launcher-form" onSubmit={runPipeline}>
+            <div className="mission-launcher-row">
               <input
                 ref={missionInputRef}
+                className="mission-launcher-input"
                 value={request}
                 onChange={(event) => setRequest(event.target.value)}
                 placeholder="Instruct the swarm... e.g., 'Build a student management portal'"
                 minLength="3"
                 required
               />
-              <button className="primary-button" type="submit" disabled={running || healingSimulating} style={{ whiteSpace: 'nowrap' }}>
+              <button
+                className="primary-button mission-launcher-btn"
+                type="submit"
+                disabled={running || healingSimulating}
+              >
                 {running ? 'Launching swarm…' : 'Launch Mission →'}
               </button>
             </div>
@@ -845,8 +1036,65 @@ function App() {
       )}
 
       {page === 'healing' && <SelfHealingScreen failures={failures} storage={storage} onRefresh={loadFailures} onSimulate={triggerSimulatedFailure} simulating={healingSimulating} />}
-      {page === 'agents' && <section className="panel"><p className="section-label">AGENT DIRECTORY</p><h2>Specialists in this swarm</h2><div className="agent-cards">{allAgents.map((agent, index) => <article key={agent}><span>{String(index + 1).padStart(2, '0')}</span><h3>{agent}</h3><p>{stageFor(agent).status === 'waiting' ? 'Ready for mission' : stageFor(agent).status}</p><button onClick={() => openInspector(agent)}>Inspect agent</button></article>)}</div></section>}
-      {page === 'logs' && <section className="panel"><div className="panel-heading"><div><p className="section-label">EXECUTION LOGS</p><h2>Swarm activity</h2></div><div className="actions"><select value={logLevel} onChange={(event) => setLogLevel(event.target.value)}><option value="all">All logs</option><option value="started">Started</option><option value="completed">Completed</option><option value="failed">Failed</option></select><button onClick={() => setClearedLogs(true)}>Clear logs</button></div></div><div className="logs">{logs.length ? logs.map((log, i) => <p key={`${log.timestamp}-${i}`}><span>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '—'}</span>{log.message}</p>) : <p>No logs to display.</p>}</div></section>}
+      {page === 'agents' && (
+        <div className="agents-page-wrapper">
+          <PageHeader
+            category="SWARM ROSTER & SPECIALISTS"
+            title="Agent Directory & Specializations"
+            subtitle="Inspect active swarm agents, roles, capabilities, and pipeline assignments."
+            badge={{ label: '8 Specialist Agents + 3 Supervisors', variant: 'completed' }}
+          />
+          <section className="panel">
+            <div className="agent-cards">
+              {allAgents.map((agent, index) => (
+                <article key={agent}>
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <h3>{agent}</h3>
+                  <p>{stageFor(agent).status === 'waiting' ? 'Ready for mission' : stageFor(agent).status}</p>
+                  <button onClick={() => openInspector(agent)}>Inspect agent</button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+      {page === 'logs' && (
+        <div className="logs-page-wrapper">
+          <PageHeader
+            category="TELEMETRY & EVENT STREAM"
+            title="Swarm Execution Logs"
+            subtitle="Real-time activity log stream across Global Orchestrator, Development Supervisor, and specialist agents."
+            badge={{ label: `${logs.length} Events Logged`, variant: 'completed' }}
+            actions={
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <select value={logLevel} onChange={(event) => setLogLevel(event.target.value)} style={{ width: 'auto', padding: '6px 12px' }}>
+                  <option value="all">All logs</option>
+                  <option value="started">Started</option>
+                  <option value="completed">Completed</option>
+                  <option value="failed">Failed</option>
+                </select>
+                <button className="secondary-button" onClick={() => setClearedLogs(true)}>
+                  Clear logs
+                </button>
+              </div>
+            }
+          />
+          <section className="panel">
+            <div className="logs">
+              {logs.length ? (
+                logs.map((log, i) => (
+                  <p key={`${log.timestamp}-${i}`}>
+                    <span>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '—'}</span>
+                    {log.message}
+                  </p>
+                ))
+              ) : (
+                <p>No logs to display.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       {page === 'database' && (
         <DatabaseScreen
           history={history}
@@ -867,16 +1115,103 @@ function App() {
       {page === 'settings' && (
         <SettingsConsole
           settings={settings}
-          onSaveSettings={(newSettings) => {
-            setSettings(newSettings)
-            localStorage.setItem('swarm-devops-settings', JSON.stringify(newSettings))
-          }}
-          onResetDefaults={() => {
-            setSettings(DEFAULT_SETTINGS)
-            localStorage.setItem('swarm-devops-settings', JSON.stringify(DEFAULT_SETTINGS))
-          }}
+          allAgents={allAgents}
+          onSaveSettings={handleSaveSettings}
+          onResetDefaults={handleResetSettings}
           onNavigateToLogs={() => setPage('logs')}
+          themeMode={themeMode}
+          onThemeChange={setThemeMode}
         />
+      )}
+
+      {/* Profile Details Modal */}
+      {profileModalOpen && (
+        <div className="profile-modal-backdrop" onClick={() => setProfileModalOpen(false)}>
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="profile-modal-header">
+              <h3>
+                <span>👤</span>
+                Profile Details & Account Information
+              </h3>
+              <button
+                type="button"
+                className="profile-modal-close-btn"
+                onClick={() => setProfileModalOpen(false)}
+                title="Close (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="profile-modal-body">
+              <div className="profile-identity-card">
+                <div className="profile-big-avatar">
+                  {userDisplayName[0]?.toUpperCase() || 'R'}
+                </div>
+                <div className="profile-identity-meta">
+                  <h4>{userDisplayName}</h4>
+                  <p>{user.email || 'operator@swarm.dev'}</p>
+                  <span className="user-dropdown-role-badge">{user.role || 'DevOps Lead'}</span>
+                </div>
+              </div>
+
+              <div className="profile-fields-grid">
+                <div className="profile-field-box">
+                  <span className="profile-field-label">User Identifier</span>
+                  <span className="profile-field-value">{user.id || 'usr-local-operator'}</span>
+                </div>
+                <div className="profile-field-box">
+                  <span className="profile-field-label">Primary Email</span>
+                  <span className="profile-field-value">{user.email || 'operator@swarm.dev'}</span>
+                </div>
+                <div className="profile-field-box">
+                  <span className="profile-field-label">DevOps Role</span>
+                  <span className="profile-field-value">{user.role || 'DevOps Lead / Authorized Operator'}</span>
+                </div>
+                <div className="profile-field-box">
+                  <span className="profile-field-label">Account Created</span>
+                  <span className="profile-field-value">
+                    {user.created_at ? new Date(user.created_at).toLocaleString() : 'Active Session'}
+                  </span>
+                </div>
+                <div className="profile-field-box">
+                  <span className="profile-field-label">Storage Engine</span>
+                  <span className="profile-field-value">
+                    {dbStatus?.storage || 'SQLite / MongoDB User-Isolated'}
+                  </span>
+                </div>
+                <div className="profile-field-box">
+                  <span className="profile-field-label">Security Protocol</span>
+                  <span className="profile-field-value">PBKDF2 Salted + JWT Bearer</span>
+                </div>
+              </div>
+
+              <div className="profile-security-notice">
+                ℹ️ <strong>Account Security & Password Management:</strong> Passwords and credential rotation for this swarm cluster are governed by enterprise DevOps security policies. To update administrative credentials or API tokens, visit <strong>Settings → Security & Approvals</strong>.
+              </div>
+            </div>
+
+            <div className="profile-modal-footer">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setProfileModalOpen(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  setProfileModalOpen(false)
+                  setPage('settings')
+                }}
+              >
+                Open Settings
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {page === 'dashboard' && (
@@ -913,19 +1248,25 @@ export default App
 function SelfHealingScreen({ failures, storage, onRefresh, onSimulate, simulating }) {
   const [selectedFailure, setSelectedFailure] = useState(null)
 
-  return <section className="panel self-healing-screen">
-    <div className="panel-heading">
-      <div>
-        <p className="section-label">AUTONOMOUS SELF-HEALING & DATABASE MEMORY</p>
-        <h2>Zero-Human Intervention Failure Recovery</h2>
-      </div>
-      <div className="actions">
-        <button onClick={onRefresh}>🔄 Refresh DB Memory</button>
-        <button className="primary-button" onClick={onSimulate} disabled={simulating}>
-          {simulating ? '⚡ Auto-Healing in progress…' : '🧪 Simulate Failure & Auto-Heal'}
-        </button>
-      </div>
-    </div>
+  return (
+    <div className="self-healing-page-wrapper">
+      <PageHeader
+        category="AUTONOMOUS RESILIENCE & SRE"
+        title="Self-Healing Engine"
+        subtitle="Continuous failure detection, automated root-cause diagnosis, and zero-human-intervention patch remediation."
+        badge={{ label: `${failures.length} Incidents Healed`, variant: 'completed' }}
+        actions={
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button className="secondary-button" onClick={onRefresh}>
+              🔄 Refresh Status
+            </button>
+            <button className="primary-button" onClick={onSimulate} disabled={simulating}>
+              {simulating ? '⚡ Auto-Healing in progress…' : '🧪 Simulate Failure & Auto-Heal'}
+            </button>
+          </div>
+        }
+      />
+      <section className="panel self-healing-screen">
 
     <div className="metrics" style={{ marginTop: 20 }}>
       <div><span>Auto-Healed Incidents</span><strong className="completed">{failures.length}</strong></div>
@@ -1021,1847 +1362,11 @@ function SelfHealingScreen({ failures, storage, onRefresh, onSimulate, simulatin
       </div>
     )}
   </section>
+  </div>
+)
 }
 
-function SettingsConsole({ settings, onSaveSettings, onResetDefaults, onNavigateToLogs }) {
-  const [activeTab, setActiveTab] = useState('autonomous')
-  const [formState, setFormState] = useState(settings)
-  const [saveStatus, setSaveStatus] = useState(null)
-  const [secretVisibility, setSecretVisibility] = useState({
-    githubToken: false,
-    dockerKey: false,
-    webhookSecret: false,
-  })
-  const [testingService, setTestingService] = useState(null)
-  const [testedServices, setTestedServices] = useState({})
-  const [testingSecret, setTestingSecret] = useState(null)
-  const [testedSecrets, setTestedSecrets] = useState({})
-  const fileInputRef = useRef(null)
 
-  useEffect(() => {
-    setFormState(settings)
-  }, [settings])
-
-  const updateSection = (section, field, value) => {
-    setFormState((prev) => ({
-      ...prev,
-      [section]: {
-        ...prev[section],
-        [field]: value,
-      },
-    }))
-    setSaveStatus(null)
-  }
-
-  const updateNestedSection = (section, parentField, field, value) => {
-    setFormState((prev) => ({
-      ...prev,
-      [section]: {
-        ...prev[section],
-        [parentField]: {
-          ...prev[section][parentField],
-          [field]: value,
-        },
-      },
-    }))
-    setSaveStatus(null)
-  }
-
-  const handleSave = () => {
-    onSaveSettings(formState)
-    setSaveStatus('saved')
-    setTimeout(() => setSaveStatus(null), 4000)
-  }
-
-  const handleReset = () => {
-    if (window.confirm('Reset all Swarm Control settings to factory defaults?')) {
-      onResetDefaults()
-      setFormState(DEFAULT_SETTINGS)
-      setSaveStatus('reset')
-      setTimeout(() => setSaveStatus(null), 4000)
-    }
-  }
-
-  const handleExport = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(formState, null, 2))
-    const downloadAnchor = document.createElement('a')
-    downloadAnchor.setAttribute('href', dataStr)
-    downloadAnchor.setAttribute('download', 'swarm-devops-settings.json')
-    document.body.appendChild(downloadAnchor)
-    downloadAnchor.click()
-    downloadAnchor.remove()
-    setSaveStatus('exported')
-    setTimeout(() => setSaveStatus(null), 3000)
-  }
-
-  const handleImport = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      try {
-        const imported = JSON.parse(event.target.result)
-        const merged = {
-          ...DEFAULT_SETTINGS,
-          ...imported,
-          autonomous: { ...DEFAULT_SETTINGS.autonomous, ...(imported.autonomous || {}) },
-          safety: { ...DEFAULT_SETTINGS.safety, ...(imported.safety || {}) },
-          selfHealing: { ...DEFAULT_SETTINGS.selfHealing, ...(imported.selfHealing || {}) },
-          buildTesting: { ...DEFAULT_SETTINGS.buildTesting, ...(imported.buildTesting || {}) },
-          notifications: { ...DEFAULT_SETTINGS.notifications, ...(imported.notifications || {}) },
-          agentConfig: { ...DEFAULT_SETTINGS.agentConfig, ...(imported.agentConfig || {}) },
-          resourceLimits: { ...DEFAULT_SETTINGS.resourceLimits, ...(imported.resourceLimits || {}) },
-          integrations: { ...DEFAULT_SETTINGS.integrations, ...(imported.integrations || {}) },
-          secrets: { ...DEFAULT_SETTINGS.secrets, ...(imported.secrets || {}) },
-          audit: { ...DEFAULT_SETTINGS.audit, ...(imported.audit || {}) },
-        }
-        setFormState(merged)
-        onSaveSettings(merged)
-        setSaveStatus('imported')
-        setTimeout(() => setSaveStatus(null), 4000)
-      } catch {
-        alert('Invalid JSON file format.')
-      }
-    }
-    reader.readAsText(file)
-  }
-
-  const handleTestService = (svcKey) => {
-    setTestingService(svcKey)
-    setTimeout(() => {
-      setTestingService(null)
-      setTestedServices((prev) => ({ ...prev, [svcKey]: 'Connected (200 OK)' }))
-      setTimeout(() => {
-        setTestedServices((prev) => ({ ...prev, [svcKey]: null }))
-      }, 5000)
-    }, 1100)
-  }
-
-  const handleTestSecret = (secretKey) => {
-    setTestingSecret(secretKey)
-    setTimeout(() => {
-      setTestingSecret(null)
-      setTestedSecrets((prev) => ({ ...prev, [secretKey]: 'Validated (Signature Valid)' }))
-      setTimeout(() => {
-        setTestedSecrets((prev) => ({ ...prev, [secretKey]: null }))
-      }, 5000)
-    }, 1000)
-  }
-
-  const handleSendTestAlert = () => {
-    setSaveStatus('ping')
-    setTimeout(() => setSaveStatus(null), 4000)
-  }
-
-  const tabs = [
-    { id: 'autonomous', label: 'Autonomous Operations', icon: '🤖' },
-    { id: 'safety', label: 'Safety & Approvals', icon: '🛡️' },
-    { id: 'selfHealing', label: 'Self-Healing Engine', icon: '🔄' },
-    { id: 'buildTesting', label: 'Build & Tests Governance', icon: '🧪' },
-    { id: 'notifications', label: 'Notifications & Alerts', icon: '🔔' },
-    { id: 'agentConfig', label: 'Agent Swarm Config', icon: '🧠' },
-    { id: 'resourceLimits', label: 'Resource Quotas & Limits', icon: '📊' },
-    { id: 'integrations', label: 'DevOps Integrations & Secrets', icon: '🔐' },
-    { id: 'audit', label: 'Audit & History Retention', icon: '📝' },
-    { id: 'workspace', label: 'Workspace Preferences', icon: '⚙️' },
-  ]
-
-  const activeTabMeta = tabs.find((t) => t.id === activeTab)
-
-  return (
-    <section className="settings-console">
-      {/* Top Banner Actions */}
-      <div className="settings-header-banner">
-        <div>
-          <p className="section-label">CENTRAL GOVERNANCE HUB</p>
-          <h2>Swarm Autonomous Control Center</h2>
-          <p className="settings-subtitle">
-            Configure swarm autonomy policies, self-healing thresholds, approval gates, test governance, and cloud credentials.
-          </p>
-        </div>
-        <div className="settings-banner-actions">
-          <button className="secondary-button" onClick={handleReset} title="Restore factory defaults">
-            🔄 Factory Defaults
-          </button>
-          <button className="primary-button save-pulse-btn" onClick={handleSave}>
-            💾 Save Changes
-          </button>
-        </div>
-      </div>
-
-      {/* Save / Feedback Status Notification Bar */}
-      {saveStatus && (
-        <div className={`settings-status-banner ${saveStatus}`}>
-          {saveStatus === 'saved' && (
-            <span>✅ <strong>Settings Saved & Active</strong> — Configuration synchronized to local storage and active across all 8 swarm agents.</span>
-          )}
-          {saveStatus === 'reset' && (
-            <span>🔄 <strong>Factory Defaults Restored</strong> — Swarm configuration restored to initial baseline.</span>
-          )}
-          {saveStatus === 'exported' && (
-            <span>📥 <strong>Configuration Exported</strong> — Downloaded <code>swarm-devops-settings.json</code>.</span>
-          )}
-          {saveStatus === 'imported' && (
-            <span>📤 <strong>Configuration Imported</strong> — Custom settings file loaded and active.</span>
-          )}
-          {saveStatus === 'ping' && (
-            <span>🔔 <strong>Test Alert Dispatched</strong> — Broadcasted synthetic test alert via configured notification channels.</span>
-          )}
-          <button className="banner-dismiss" onClick={() => setSaveStatus(null)}>✕</button>
-        </div>
-      )}
-
-      {/* Layout: Sidebar Tabs + Active Content Deck */}
-      <div className="settings-deck-grid">
-        <aside className="settings-nav-sidebar" aria-label="Settings Categories">
-          <div className="settings-nav-header">
-            <span>OPERATIONAL DOMAINS</span>
-          </div>
-          <div className="settings-nav-pills">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                className={`settings-nav-pill ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <span className="pill-icon">{tab.icon}</span>
-                <span className="pill-label">{tab.label}</span>
-                {tab.id === 'autonomous' && formState.autonomous.autonomousMode && (
-                  <span className="nav-badge-dot" title="Autonomous Engine Active" />
-                )}
-                {tab.id === 'selfHealing' && formState.selfHealing.autoRemediation && (
-                  <span className="nav-badge-pill">Auto</span>
-                )}
-              </button>
-            ))}
-          </div>
-
-          <div className="settings-sidebar-card">
-            <div className="sidebar-card-header">
-              <span>⚡ SWARM POSTURE</span>
-            </div>
-            <p className="posture-text">
-              Autonomy: <strong>{formState.autonomous.autonomyLevel.toUpperCase()}</strong>
-            </p>
-            <p className="posture-sub">
-              Self-Healing: {formState.selfHealing.autoRemediation ? 'Active (Auto-Remediate)' : 'Diagnostics Only'}
-            </p>
-            <p className="posture-sub">
-              Quality Gate: {formState.buildTesting.minSuccessRate}% Min Pass Rate
-            </p>
-          </div>
-        </aside>
-
-        {/* Tab Content Panel */}
-        <div className="settings-tab-panel">
-          {/* TAB 1: AUTONOMOUS OPERATIONS */}
-          {activeTab === 'autonomous' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">CORE ENGINE GOVERNANCE</span>
-                  <h3>🤖 Autonomous Swarm Operations</h3>
-                  <p>Define operational autonomy levels, failure retry limits, and rollback behaviors.</p>
-                </div>
-                <span className={`status-pill ${formState.autonomous.autonomousMode ? 'completed' : 'failed'}`}>
-                  {formState.autonomous.autonomousMode ? 'Autonomous Active' : 'Autonomous Paused'}
-                </span>
-              </div>
-
-              {/* Autonomy Level Segmented Control */}
-              <div className="control-group">
-                <label className="control-group-title">Autonomy Governance Level</label>
-                <p className="control-group-desc">Select how much operational freedom the 8-agent swarm is granted.</p>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.autonomous.autonomyLevel === 'full' ? 'active' : ''}`}
-                    onClick={() => updateSection('autonomous', 'autonomyLevel', 'full')}
-                  >
-                    <span className="segment-icon">🚀</span>
-                    <div>
-                      <strong>Full Autonomy</strong>
-                      <small>Unattended self-governing execution</small>
-                    </div>
-                    <span className="segment-badge">Recommended</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.autonomous.autonomyLevel === 'supervised' ? 'active' : ''}`}
-                    onClick={() => updateSection('autonomous', 'autonomyLevel', 'supervised')}
-                  >
-                    <span className="segment-icon">🛡️</span>
-                    <div>
-                      <strong>Supervised</strong>
-                      <small>Confirm high-risk gates (DB/Prod)</small>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.autonomous.autonomyLevel === 'manual' ? 'active' : ''}`}
-                    onClick={() => updateSection('autonomous', 'autonomyLevel', 'manual')}
-                  >
-                    <span className="segment-icon">🛑</span>
-                    <div>
-                      <strong>Manual Oversight</strong>
-                      <small>Step-by-step human confirmation</small>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Mode Posture Alert Banner */}
-              <div className="info-callout">
-                <span className="callout-icon">ℹ️</span>
-                <div>
-                  <strong>Active Autonomy Policy:</strong>{' '}
-                  {formState.autonomous.autonomyLevel === 'full' &&
-                    'Swarm will autonomously plan, write code, run builds, execute tests, and self-heal any failures without human stalls.'}
-                  {formState.autonomous.autonomyLevel === 'supervised' &&
-                    'Swarm executes planning, coding, and tests automatically, but pauses for human sign-off on database and production deployments.'}
-                  {formState.autonomous.autonomyLevel === 'manual' &&
-                    'Autonomous execution is paused. Each agent phase must be explicitly approved before execution begins.'}
-                </div>
-              </div>
-
-              {/* Switch Toggles List */}
-              <div className="switches-list">
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Autonomous Execution Engine</label>
-                    <p className="switch-desc">Enable background agent task coordination and pipeline orchestration.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.autonomous.autonomousMode}
-                      onChange={(e) => updateSection('autonomous', 'autonomousMode', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Auto-Healing Engine</label>
-                    <p className="switch-desc">Automatically diagnose, synthesize bug fixes, and patch code when stages fail.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.autonomous.autoHealing}
-                      onChange={(e) => updateSection('autonomous', 'autoHealing', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Auto-Retry Failed Pipeline Stages</label>
-                    <p className="switch-desc">Automatically retry transient failures before declaring stage failed.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.autonomous.autoRetryFailedJobs}
-                      onChange={(e) => updateSection('autonomous', 'autoRetryFailedJobs', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Require Human Approval for Critical Actions</label>
-                    <p className="switch-desc">Pause pipeline and request manual sign-off before executing high-risk operations.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.autonomous.requireHumanApproval}
-                      onChange={(e) => updateSection('autonomous', 'requireHumanApproval', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Automatic Rollback on Failed Remediation</label>
-                    <p className="switch-desc">Restore previous stable working commit if auto-healing attempts are unsuccessful.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.autonomous.rollbackOnFailedFix}
-                      onChange={(e) => updateSection('autonomous', 'rollbackOnFailedFix', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-
-              {/* Number Stepper */}
-              <div className="numeric-control-row">
-                <div>
-                  <label className="control-group-title">Maximum Auto-Healing Remediation Attempts</label>
-                  <p className="control-group-desc">Number of consecutive healing iterations before halting and alerting operator.</p>
-                </div>
-                <div className="stepper-input">
-                  <button
-                    type="button"
-                    onClick={() => updateSection('autonomous', 'maxRemediationAttempts', Math.max(1, formState.autonomous.maxRemediationAttempts - 1))}
-                  >
-                    −
-                  </button>
-                  <span className="stepper-val">{formState.autonomous.maxRemediationAttempts}</span>
-                  <button
-                    type="button"
-                    onClick={() => updateSection('autonomous', 'maxRemediationAttempts', Math.min(10, formState.autonomous.maxRemediationAttempts + 1))}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: SAFETY & APPROVAL RULES */}
-          {activeTab === 'safety' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">ZERO-TRUST SAFEGUARDS</span>
-                  <h3>🛡️ Safety Controls & Approval Gates</h3>
-                  <p>Enforce pre-execution approval gates, risk policies, and protect mission-critical environments.</p>
-                </div>
-                <span className="status-pill completed">Protected</span>
-              </div>
-
-              {/* Risk Tier Selection */}
-              <div className="control-group">
-                <label className="control-group-title">Risk Assessment Policy</label>
-                <p className="control-group-desc">Determines how agent actions are categorized into risk tiers.</p>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.safety.riskPolicy === 'low' ? 'active' : ''}`}
-                    onClick={() => updateSection('safety', 'riskPolicy', 'low')}
-                  >
-                    <span className="segment-icon">🟢</span>
-                    <div>
-                      <strong>Permissive</strong>
-                      <small>Fast execution, minimal prompts</small>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.safety.riskPolicy === 'medium' ? 'active' : ''}`}
-                    onClick={() => updateSection('safety', 'riskPolicy', 'medium')}
-                  >
-                    <span className="segment-icon">🟡</span>
-                    <div>
-                      <strong>Balanced</strong>
-                      <small>Standard enterprise safety</small>
-                    </div>
-                    <span className="segment-badge">Recommended</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.safety.riskPolicy === 'high' ? 'active' : ''}`}
-                    onClick={() => updateSection('safety', 'riskPolicy', 'high')}
-                  >
-                    <span className="segment-icon">🔴</span>
-                    <div>
-                      <strong>Strict Zero-Trust</strong>
-                      <small>Maximum gates on all changes</small>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Specific Pre-Execution Gates */}
-              <div className="switches-list">
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Require Approval Before Production Deployments</label>
-                    <p className="switch-desc">Hold production releases until an authorized operator verifies the release manifest.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.safety.approvalBeforeProduction}
-                      onChange={(e) => updateSection('safety', 'approvalBeforeProduction', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Require Approval for Database Schema Migrations</label>
-                    <p className="switch-desc">Prevent automated DDL mutations, column alterations, or data migration drops.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.safety.approvalBeforeDatabase}
-                      onChange={(e) => updateSection('safety', 'approvalBeforeDatabase', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Require Approval for Cloud Infrastructure Modification</label>
-                    <p className="switch-desc">Guard against automated creation or deletion of Kubernetes clusters, VPCs, and storage buckets.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.safety.approvalBeforeInfra}
-                      onChange={(e) => updateSection('safety', 'approvalBeforeInfra', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-
-              {/* Protected Environments Multi-Select */}
-              <div className="control-group" style={{ marginTop: 20 }}>
-                <label className="control-group-title">Protected Target Environments</label>
-                <p className="control-group-desc">Direct autonomous deployments are prohibited in checked environments.</p>
-                <div className="checkbox-grid">
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.safety.protectedEnvironments.production}
-                      onChange={(e) => updateNestedSection('safety', 'protectedEnvironments', 'production', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Production (prod-us-east-1)</strong>
-                      <small>Live user traffic, locked against direct unreviewed pushes</small>
-                    </div>
-                    <span className="badge-tag danger">Locked</span>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.safety.protectedEnvironments.staging}
-                      onChange={(e) => updateNestedSection('safety', 'protectedEnvironments', 'staging', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Staging (staging-cluster)</strong>
-                      <small>Pre-production verification and smoke test target</small>
-                    </div>
-                    <span className="badge-tag warning">Guarded</span>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.safety.protectedEnvironments.development}
-                      onChange={(e) => updateNestedSection('safety', 'protectedEnvironments', 'development', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Development (dev-sandbox)</strong>
-                      <small>Continuous deployment sandbox for rapid iteration</small>
-                    </div>
-                    <span className="badge-tag success">Unlocked</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: SELF-HEALING CONFIGURATION */}
-          {activeTab === 'selfHealing' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">AUTONOMOUS RESILIENCE</span>
-                  <h3>🔄 Self-Healing Engine Configuration</h3>
-                  <p>Fine-tune automated root-cause analysis, patch generation, and post-remediation validation.</p>
-                </div>
-                <span className="status-pill completed">100% Remediation Rate</span>
-              </div>
-
-              {/* Status Memory Card */}
-              <div className="db-memory-status-box">
-                <span className="status-box-icon">🧠</span>
-                <div>
-                  <strong>Database Failure Memory Active</strong>
-                  <p>Failure signatures, error ASTs, and successful code patches are persisted in the database to prevent duplicate bugs.</p>
-                </div>
-              </div>
-
-              <div className="switches-list">
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Automated Error Diagnostics & AST Analysis</label>
-                    <p className="switch-desc">Parse exception stack traces, identify broken line ranges, and extract fault signatures.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.selfHealing.autoDiagnosis}
-                      onChange={(e) => updateSection('selfHealing', 'autoDiagnosis', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Autonomous Code Patch Generation (Auto-Remediation)</label>
-                    <p className="switch-desc">Instruct Coding Agent to synthesize verified source code patches to heal broken components.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.selfHealing.autoRemediation}
-                      onChange={(e) => updateSection('selfHealing', 'autoRemediation', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Continuous Swarm Health Checks</label>
-                    <p className="switch-desc">Perform periodic automated health checks on active microservices and pipeline endpoints.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.selfHealing.runHealthChecks}
-                      onChange={(e) => updateSection('selfHealing', 'runHealthChecks', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Post-Remediation Verification Gate</label>
-                    <p className="switch-desc">Re-run unit and integration tests after auto-healing to ensure the patch resolved the issue.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.selfHealing.verifyAfterFix}
-                      onChange={(e) => updateSection('selfHealing', 'verifyAfterFix', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Rollback if Verification Fails</label>
-                    <p className="switch-desc">If the healed code fails subsequent tests, automatically revert to prior safe commit.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.selfHealing.rollbackIfVerifyFails}
-                      onChange={(e) => updateSection('selfHealing', 'rollbackIfVerifyFails', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-
-              {/* Detection Interval Dropdown */}
-              <div className="input-group-row" style={{ marginTop: 20 }}>
-                <div>
-                  <label className="control-group-title">Autonomous Health Check Detection Interval</label>
-                  <p className="control-group-desc">Frequency of automated telemetry sweeps and error detection.</p>
-                </div>
-                <select
-                  className="settings-select"
-                  value={formState.selfHealing.detectionInterval}
-                  onChange={(e) => updateSection('selfHealing', 'detectionInterval', e.target.value)}
-                >
-                  <option value="10s">10 seconds (High frequency · Sandbox)</option>
-                  <option value="30s">30 seconds (Recommended · Production)</option>
-                  <option value="1m">1 minute (Balanced)</option>
-                  <option value="5m">5 minutes (Low resource overhead)</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: BUILD & TESTING GOVERNANCE */}
-          {activeTab === 'buildTesting' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">CI/CD VERIFICATION GATES</span>
-                  <h3>🧪 Build & Testing Governance</h3>
-                  <p>Define automated test coverage thresholds, security checks, and build artifact validation gates.</p>
-                </div>
-                <span className="status-pill completed">{formState.buildTesting.minSuccessRate}% Threshold</span>
-              </div>
-
-              {/* Slider for Min Success Rate */}
-              <div className="slider-control-card">
-                <div className="slider-header">
-                  <div>
-                    <label className="control-group-title">Minimum Test Success Rate</label>
-                    <p className="control-group-desc">Pipelines with test pass rates below this threshold are blocked from release.</p>
-                  </div>
-                  <span className="slider-badge" style={{ color: formState.buildTesting.minSuccessRate >= 90 ? '#4ade80' : '#facc15' }}>
-                    {formState.buildTesting.minSuccessRate}% Pass Required
-                  </span>
-                </div>
-                <div className="slider-track-wrap">
-                  <input
-                    type="range"
-                    min="60"
-                    max="100"
-                    step="5"
-                    value={formState.buildTesting.minSuccessRate}
-                    onChange={(e) => updateSection('buildTesting', 'minSuccessRate', Number(e.target.value))}
-                    className="settings-range"
-                  />
-                  <div className="slider-ticks">
-                    <span>60% (Permissive)</span>
-                    <span>75%</span>
-                    <span>90% (Standard)</span>
-                    <span>100% (Strict)</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="switches-list" style={{ marginTop: 24 }}>
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">AST Syntax Compilation Checks</label>
-                    <p className="switch-desc">Verify that all generated Python/JavaScript syntax trees compile cleanly before execution.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.astCompilation}
-                      onChange={(e) => updateSection('buildTesting', 'astCompilation', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Automated Unit Test Execution (pytest / vitest)</label>
-                    <p className="switch-desc">Run comprehensive test suites against individual classes, services, and API endpoints.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.unitTests}
-                      onChange={(e) => updateSection('buildTesting', 'unitTests', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Integration & Multi-Agent Tests</label>
-                    <p className="switch-desc">Verify data exchange, token propagation, and schema contracts across all agents.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.integrationTests}
-                      onChange={(e) => updateSection('buildTesting', 'integrationTests', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Static Security & Vulnerability Analysis</label>
-                    <p className="switch-desc">Audit generated source code for hardcoded secrets, SQL injection, and OWASP top-10 flaws.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.securityChecks}
-                      onChange={(e) => updateSection('buildTesting', 'securityChecks', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Dependency CVE & Outdated Package Audit</label>
-                    <p className="switch-desc">Check third-party packages against national vulnerability databases.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.dependencyChecks}
-                      onChange={(e) => updateSection('buildTesting', 'dependencyChecks', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Strict Quality Gate Enforcement</label>
-                    <p className="switch-desc">Halt pipeline progression if code coverage, lint score, or security audit falls below spec.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.qualityGates}
-                      onChange={(e) => updateSection('buildTesting', 'qualityGates', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Block Deployment on Gate Failure</label>
-                    <p className="switch-desc">Hard-block release if any automated test assertion fails, regardless of operator override.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.buildTesting.blockDeploymentOnFail}
-                      onChange={(e) => updateSection('buildTesting', 'blockDeploymentOnFail', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: NOTIFICATIONS & ALERTS */}
-          {activeTab === 'notifications' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">COMMUNICATIONS & ROUTING</span>
-                  <h3>🔔 Notifications & Alert Routing</h3>
-                  <p>Configure automated incident alerts across In-App Dashboard, Email, Slack, and Webhooks.</p>
-                </div>
-                <button className="secondary-button" onClick={handleSendTestAlert}>
-                  🔔 Dispatch Test Alert
-                </button>
-              </div>
-
-              {/* Delivery Channel Selector */}
-              <div className="control-group">
-                <label className="control-group-title">Primary Notification Channel</label>
-                <p className="control-group-desc">Select how the swarm dispatches critical failure and self-healing reports.</p>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.notifications.channel === 'dashboard' ? 'active' : ''}`}
-                    onClick={() => updateSection('notifications', 'channel', 'dashboard')}
-                  >
-                    <span className="segment-icon">💻</span>
-                    <div>
-                      <strong>Dashboard</strong>
-                      <small>In-App toasts & event log</small>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.notifications.channel === 'email' ? 'active' : ''}`}
-                    onClick={() => updateSection('notifications', 'channel', 'email')}
-                  >
-                    <span className="segment-icon">📧</span>
-                    <div>
-                      <strong>Email</strong>
-                      <small>Operator mailbox</small>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.notifications.channel === 'slack' ? 'active' : ''}`}
-                    onClick={() => updateSection('notifications', 'channel', 'slack')}
-                  >
-                    <span className="segment-icon">💬</span>
-                    <div>
-                      <strong>Slack</strong>
-                      <small>Incident channel webhook</small>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.notifications.channel === 'webhook' ? 'active' : ''}`}
-                    onClick={() => updateSection('notifications', 'channel', 'webhook')}
-                  >
-                    <span className="segment-icon">🔗</span>
-                    <div>
-                      <strong>Webhook</strong>
-                      <small>Custom HTTP endpoint</small>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Channel Specific Configuration Inputs */}
-              <div className="input-fields-stack">
-                <div className="input-field-wrap">
-                  <label className="field-label">Alert Recipient Email</label>
-                  <input
-                    type="email"
-                    className="settings-text-input"
-                    value={formState.notifications.emailAddress}
-                    onChange={(e) => updateSection('notifications', 'emailAddress', e.target.value)}
-                    placeholder="devops-alerts@organization.com"
-                  />
-                  <span className="field-hint">Used for urgent severity escalation alerts and pipeline failure reports.</span>
-                </div>
-
-                <div className="input-field-wrap">
-                  <label className="field-label">Slack Alert Channel / Incoming Webhook</label>
-                  <input
-                    type="text"
-                    className="settings-text-input"
-                    value={formState.notifications.slackChannel}
-                    onChange={(e) => updateSection('notifications', 'slackChannel', e.target.value)}
-                    placeholder="#devops-swarm-alerts"
-                  />
-                </div>
-
-                <div className="input-field-wrap">
-                  <label className="field-label">Generic Webhook Endpoint</label>
-                  <input
-                    type="url"
-                    className="settings-text-input"
-                    value={formState.notifications.webhookUrl}
-                    onChange={(e) => updateSection('notifications', 'webhookUrl', e.target.value)}
-                    placeholder="https://api.internal.devops/hooks/swarm"
-                  />
-                </div>
-              </div>
-
-              {/* Alert Triggers Checkboxes */}
-              <div className="control-group" style={{ marginTop: 24 }}>
-                <label className="control-group-title">Swarm Event Triggers</label>
-                <p className="control-group-desc">Select which swarm milestones generate automated notifications.</p>
-                <div className="checkbox-grid">
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.notifications.pipelineFailures}
-                      onChange={(e) => updateSection('notifications', 'pipelineFailures', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Pipeline Failures</strong>
-                      <small>Any stage failure during plan, code, build, or test</small>
-                    </div>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.notifications.selfHealingActions}
-                      onChange={(e) => updateSection('notifications', 'selfHealingActions', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Self-Healing Remediations</strong>
-                      <small>Whenever an autonomous patch is synthesized and applied</small>
-                    </div>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.notifications.deploymentFailures}
-                      onChange={(e) => updateSection('notifications', 'deploymentFailures', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Deployment Failures</strong>
-                      <small>Errors encountered during production or staging deploy</small>
-                    </div>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.notifications.criticalErrors}
-                      onChange={(e) => updateSection('notifications', 'criticalErrors', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Critical System Exceptions</strong>
-                      <small>Unhandled runtime errors, crash loops, or kernel faults</small>
-                    </div>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.notifications.agentFailures}
-                      onChange={(e) => updateSection('notifications', 'agentFailures', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Agent Worker Crashes</strong>
-                      <small>Unresponsive agent heartbeat or worker timeout</small>
-                    </div>
-                  </label>
-
-                  <label className="checkbox-card">
-                    <input
-                      type="checkbox"
-                      checked={formState.notifications.databaseFailures}
-                      onChange={(e) => updateSection('notifications', 'databaseFailures', e.target.checked)}
-                    />
-                    <div>
-                      <strong>Database Sync Failures</strong>
-                      <small>Connection drops or migration sync failures in SQLite/Postgres</small>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Minimum Severity Dropdown */}
-              <div className="input-group-row" style={{ marginTop: 20 }}>
-                <div>
-                  <label className="control-group-title">Minimum Notification Severity</label>
-                  <p className="control-group-desc">Filter noisy info messages and only page on critical outages.</p>
-                </div>
-                <select
-                  className="settings-select"
-                  value={formState.notifications.alertSeverity}
-                  onChange={(e) => updateSection('notifications', 'alertSeverity', e.target.value)}
-                >
-                  <option value="info">Info (All operational status pings)</option>
-                  <option value="warning">Warning (Transient errors and warnings)</option>
-                  <option value="critical">Critical (Breaking failures requiring attention)</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 6: AGENT SWARM CONFIGURATION */}
-          {activeTab === 'agentConfig' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">ORCHESTRATION & WORKERS</span>
-                  <h3>🧠 Agent Swarm Configuration</h3>
-                  <p>Manage agent worker concurrency, task timeouts, heartbeat monitors, and worker auto-restart.</p>
-                </div>
-                <span className="status-pill completed">8 Specialists Online</span>
-              </div>
-
-              {/* Active Agent Specialist Deck */}
-              <div className="specialists-mini-deck">
-                {allAgents.map((agentName) => {
-                  const isDev = developmentAgents.includes(agentName)
-                  return (
-                    <div key={agentName} className="specialist-chip">
-                      <span className={`specialist-dot ${isDev ? 'dev' : 'ops'}`} />
-                      <div>
-                        <strong>{agentName}</strong>
-                        <small>{isDev ? 'Development Supervised' : 'Operations Supervised'}</small>
-                      </div>
-                      <span className="agent-ready-badge">Active</span>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Concurrency and Limits Steppers */}
-              <div className="control-group" style={{ marginTop: 24 }}>
-                <label className="control-group-title">Swarm Concurrency Limits</label>
-                <div className="stepper-grid">
-                  <div className="stepper-card">
-                    <div>
-                      <strong>Max Active Agent Workers</strong>
-                      <small>Concurrent specialist agents dispatched in parallel</small>
-                    </div>
-                    <div className="stepper-input">
-                      <button
-                        type="button"
-                        onClick={() => updateSection('agentConfig', 'maxActiveAgents', Math.max(1, formState.agentConfig.maxActiveAgents - 1))}
-                      >
-                        −
-                      </button>
-                      <span className="stepper-val">{formState.agentConfig.maxActiveAgents}</span>
-                      <button
-                        type="button"
-                        onClick={() => updateSection('agentConfig', 'maxActiveAgents', Math.min(8, formState.agentConfig.maxActiveAgents + 1))}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="stepper-card">
-                    <div>
-                      <strong>Max Parallel Pipeline Tasks</strong>
-                      <small>Simultaneous mission pipelines supported</small>
-                    </div>
-                    <div className="stepper-input">
-                      <button
-                        type="button"
-                        onClick={() => updateSection('agentConfig', 'maxParallelTasks', Math.max(1, formState.agentConfig.maxParallelTasks - 1))}
-                      >
-                        −
-                      </button>
-                      <span className="stepper-val">{formState.agentConfig.maxParallelTasks}</span>
-                      <button
-                        type="button"
-                        onClick={() => updateSection('agentConfig', 'maxParallelTasks', Math.min(5, formState.agentConfig.maxParallelTasks + 1))}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Execution Timeout Dropdown */}
-              <div className="input-group-row" style={{ marginTop: 20 }}>
-                <div>
-                  <label className="control-group-title">Agent Execution Timeout</label>
-                  <p className="control-group-desc">Maximum time an individual agent worker may run before being terminated for deadlock.</p>
-                </div>
-                <select
-                  className="settings-select"
-                  value={formState.agentConfig.executionTimeout}
-                  onChange={(e) => updateSection('agentConfig', 'executionTimeout', e.target.value)}
-                >
-                  <option value="1m">1 minute (Quick tasks)</option>
-                  <option value="5m">5 minutes (Standard code generation)</option>
-                  <option value="15m">15 minutes (Heavy builds and test suites)</option>
-                  <option value="30m">30 minutes (Large enterprise mono-repos)</option>
-                </select>
-              </div>
-
-              {/* Resilience Switches */}
-              <div className="switches-list" style={{ marginTop: 20 }}>
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Agent Heartbeat & Liveness Monitoring</label>
-                    <p className="switch-desc">Track real-time health pulses from each agent worker thread.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.agentConfig.agentHealthMonitoring}
-                      onChange={(e) => updateSection('agentConfig', 'agentHealthMonitoring', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Auto-Restart Crashed Agent Workers</label>
-                    <p className="switch-desc">Automatically respawn agent daemon processes if an unhandled fatal error occurs.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.agentConfig.autoAgentRestart}
-                      onChange={(e) => updateSection('agentConfig', 'autoAgentRestart', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Agent Failure Task Recovery Handoff</label>
-                    <p className="switch-desc">Gracefully re-assign interrupted tasks to redundant swarm agents without restarting entire mission.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.agentConfig.agentFailureRecovery}
-                      onChange={(e) => updateSection('agentConfig', 'agentFailureRecovery', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 7: RESOURCE LIMITS & QUOTAS */}
-          {activeTab === 'resourceLimits' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">COMPUTE & MEMORY CONSTRAINTS</span>
-                  <h3>📊 Resource Quotas & Limits</h3>
-                  <p>Protect host system performance by capping CPU, memory, and concurrent job consumption.</p>
-                </div>
-                <span className="status-pill completed">Throttling Active</span>
-              </div>
-
-              {/* CPU Quota Slider */}
-              <div className="slider-control-card">
-                <div className="slider-header">
-                  <div>
-                    <label className="control-group-title">Maximum Host CPU Utilization Cap</label>
-                    <p className="control-group-desc">Swarm will throttle agent dispatch when host CPU exceeds this threshold.</p>
-                  </div>
-                  <span className="slider-badge" style={{ color: formState.resourceLimits.cpuLimit > 85 ? '#ef4444' : '#4ade80' }}>
-                    {formState.resourceLimits.cpuLimit}% CPU Cap
-                  </span>
-                </div>
-                <div className="slider-track-wrap">
-                  <input
-                    type="range"
-                    min="30"
-                    max="95"
-                    step="5"
-                    value={formState.resourceLimits.cpuLimit}
-                    onChange={(e) => updateSection('resourceLimits', 'cpuLimit', Number(e.target.value))}
-                    className="settings-range"
-                  />
-                  <div className="slider-ticks">
-                    <span>30%</span>
-                    <span>50%</span>
-                    <span>70%</span>
-                    <span>80% (Recommended)</span>
-                    <span>95% (Max)</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Memory Limit and Job limits */}
-              <div className="stepper-grid" style={{ marginTop: 24 }}>
-                <div className="stepper-card">
-                  <div>
-                    <strong>Worker Memory Limit (GB)</strong>
-                    <small>Maximum RAM ceiling before worker recycling</small>
-                  </div>
-                  <div className="stepper-input">
-                    <button
-                      type="button"
-                      onClick={() => updateSection('resourceLimits', 'memoryLimit', Math.max(1, formState.resourceLimits.memoryLimit - 1))}
-                    >
-                      −
-                    </button>
-                    <span className="stepper-val">{formState.resourceLimits.memoryLimit} GB</span>
-                    <button
-                      type="button"
-                      onClick={() => updateSection('resourceLimits', 'memoryLimit', Math.min(32, formState.resourceLimits.memoryLimit + 1))}
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div className="stepper-card">
-                  <div>
-                    <strong>Max Concurrent Pipeline Jobs</strong>
-                    <small>Simultaneous pipeline executions allowed</small>
-                  </div>
-                  <div className="stepper-input">
-                    <button
-                      type="button"
-                      onClick={() => updateSection('resourceLimits', 'maxConcurrentJobs', Math.max(1, formState.resourceLimits.maxConcurrentJobs - 1))}
-                    >
-                      −
-                    </button>
-                    <span className="stepper-val">{formState.resourceLimits.maxConcurrentJobs}</span>
-                    <button
-                      type="button"
-                      onClick={() => updateSection('resourceLimits', 'maxConcurrentJobs', Math.min(10, formState.resourceLimits.maxConcurrentJobs + 1))}
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div className="stepper-card">
-                  <div>
-                    <strong>Job Execution Timeout (Minutes)</strong>
-                    <small>Maximum total duration for an end-to-end pipeline</small>
-                  </div>
-                  <div className="stepper-input">
-                    <button
-                      type="button"
-                      onClick={() => updateSection('resourceLimits', 'executionTimeoutMinutes', Math.max(1, formState.resourceLimits.executionTimeoutMinutes - 1))}
-                    >
-                      −
-                    </button>
-                    <span className="stepper-val">{formState.resourceLimits.executionTimeoutMinutes}m</span>
-                    <button
-                      type="button"
-                      onClick={() => updateSection('resourceLimits', 'executionTimeoutMinutes', Math.min(60, formState.resourceLimits.executionTimeoutMinutes + 1))}
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Resource notice callout */}
-              <div className="info-callout" style={{ marginTop: 24 }}>
-                <span className="callout-icon">🛡️</span>
-                <div>
-                  <strong>OOM Prevention & Graceful Throttling:</strong>{' '}
-                  If host resource consumption reaches the threshold, pending agent tasks are queued in memory until memory is reclaimed.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 8: DEVOPS INTEGRATIONS & SECRETS VAULT */}
-          {activeTab === 'integrations' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">ECOSYSTEM CONNECTORS</span>
-                  <h3>🔐 DevOps Integrations & Secrets Vault</h3>
-                  <p>Connect GitHub, Docker Hub, Kubernetes, and configure hardware-isolated secret credentials.</p>
-                </div>
-                <span className="status-pill completed">Encrypted Vault</span>
-              </div>
-
-              {/* Connected Services Grid */}
-              <div className="control-group">
-                <label className="control-group-title">Connected Toolchain Integrations</label>
-                <div className="integrations-grid">
-                  {/* GitHub */}
-                  <div className="integration-card">
-                    <div className="integration-head">
-                      <div className="integration-brand">
-                        <span className="integration-icon">🐙</span>
-                        <div>
-                          <strong>GitHub</strong>
-                          <small>Repo: {formState.integrations.github.repo} ({formState.integrations.github.branch})</small>
-                        </div>
-                      </div>
-                      <span className={`status-pill ${formState.integrations.github.connected ? 'completed' : 'failed'}`}>
-                        {formState.integrations.github.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </div>
-                    <div className="integration-actions">
-                      <button
-                        className="integration-toggle-btn"
-                        onClick={() => updateNestedSection('integrations', 'github', 'connected', !formState.integrations.github.connected)}
-                      >
-                        {formState.integrations.github.connected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        className="integration-test-btn"
-                        disabled={testingService === 'github'}
-                        onClick={() => handleTestService('github')}
-                      >
-                        {testingService === 'github' ? 'Testing…' : testedServices['github'] ? '🟢 OK' : 'Test Ping'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Docker Hub */}
-                  <div className="integration-card">
-                    <div className="integration-head">
-                      <div className="integration-brand">
-                        <span className="integration-icon">🐳</span>
-                        <div>
-                          <strong>Docker Hub / OCI</strong>
-                          <small>Registry: {formState.integrations.docker.registry}</small>
-                        </div>
-                      </div>
-                      <span className={`status-pill ${formState.integrations.docker.connected ? 'completed' : 'failed'}`}>
-                        {formState.integrations.docker.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </div>
-                    <div className="integration-actions">
-                      <button
-                        className="integration-toggle-btn"
-                        onClick={() => updateNestedSection('integrations', 'docker', 'connected', !formState.integrations.docker.connected)}
-                      >
-                        {formState.integrations.docker.connected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        className="integration-test-btn"
-                        disabled={testingService === 'docker'}
-                        onClick={() => handleTestService('docker')}
-                      >
-                        {testingService === 'docker' ? 'Testing…' : testedServices['docker'] ? '🟢 OK' : 'Test Ping'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Kubernetes */}
-                  <div className="integration-card">
-                    <div className="integration-head">
-                      <div className="integration-brand">
-                        <span className="integration-icon">☸️</span>
-                        <div>
-                          <strong>Kubernetes Cluster</strong>
-                          <small>Cluster: {formState.integrations.kubernetes.cluster}</small>
-                        </div>
-                      </div>
-                      <span className={`status-pill ${formState.integrations.kubernetes.connected ? 'completed' : 'failed'}`}>
-                        {formState.integrations.kubernetes.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </div>
-                    <div className="integration-actions">
-                      <button
-                        className="integration-toggle-btn"
-                        onClick={() => updateNestedSection('integrations', 'kubernetes', 'connected', !formState.integrations.kubernetes.connected)}
-                      >
-                        {formState.integrations.kubernetes.connected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        className="integration-test-btn"
-                        disabled={testingService === 'kubernetes'}
-                        onClick={() => handleTestService('kubernetes')}
-                      >
-                        {testingService === 'kubernetes' ? 'Testing…' : testedServices['kubernetes'] ? '🟢 OK' : 'Test Ping'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Jenkins CI */}
-                  <div className="integration-card">
-                    <div className="integration-head">
-                      <div className="integration-brand">
-                        <span className="integration-icon">👨‍💼</span>
-                        <div>
-                          <strong>Jenkins CI</strong>
-                          <small>Server: {formState.integrations.jenkins.server}</small>
-                        </div>
-                      </div>
-                      <span className={`status-pill ${formState.integrations.jenkins.connected ? 'completed' : 'failed'}`}>
-                        {formState.integrations.jenkins.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </div>
-                    <div className="integration-actions">
-                      <button
-                        className="integration-toggle-btn"
-                        onClick={() => updateNestedSection('integrations', 'jenkins', 'connected', !formState.integrations.jenkins.connected)}
-                      >
-                        {formState.integrations.jenkins.connected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        className="integration-test-btn"
-                        disabled={testingService === 'jenkins'}
-                        onClick={() => handleTestService('jenkins')}
-                      >
-                        {testingService === 'jenkins' ? 'Testing…' : testedServices['jenkins'] ? '🟢 OK' : 'Test Ping'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Slack */}
-                  <div className="integration-card">
-                    <div className="integration-head">
-                      <div className="integration-brand">
-                        <span className="integration-icon">💬</span>
-                        <div>
-                          <strong>Slack Workspace</strong>
-                          <small>Channel: {formState.integrations.slack.channel}</small>
-                        </div>
-                      </div>
-                      <span className={`status-pill ${formState.integrations.slack.connected ? 'completed' : 'failed'}`}>
-                        {formState.integrations.slack.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </div>
-                    <div className="integration-actions">
-                      <button
-                        className="integration-toggle-btn"
-                        onClick={() => updateNestedSection('integrations', 'slack', 'connected', !formState.integrations.slack.connected)}
-                      >
-                        {formState.integrations.slack.connected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        className="integration-test-btn"
-                        disabled={testingService === 'slack'}
-                        onClick={() => handleTestService('slack')}
-                      >
-                        {testingService === 'slack' ? 'Testing…' : testedServices['slack'] ? '🟢 OK' : 'Test Ping'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Generic Webhook */}
-                  <div className="integration-card">
-                    <div className="integration-head">
-                      <div className="integration-brand">
-                        <span className="integration-icon">🔗</span>
-                        <div>
-                          <strong>Generic Webhook</strong>
-                          <small>Endpoint: {formState.integrations.webhook.endpoint.slice(0, 32)}…</small>
-                        </div>
-                      </div>
-                      <span className={`status-pill ${formState.integrations.webhook.connected ? 'completed' : 'failed'}`}>
-                        {formState.integrations.webhook.connected ? 'Connected' : 'Disconnected'}
-                      </span>
-                    </div>
-                    <div className="integration-actions">
-                      <button
-                        className="integration-toggle-btn"
-                        onClick={() => updateNestedSection('integrations', 'webhook', 'connected', !formState.integrations.webhook.connected)}
-                      >
-                        {formState.integrations.webhook.connected ? 'Disconnect' : 'Connect'}
-                      </button>
-                      <button
-                        className="integration-test-btn"
-                        disabled={testingService === 'webhook'}
-                        onClick={() => handleTestService('webhook')}
-                      >
-                        {testingService === 'webhook' ? 'Testing…' : testedServices['webhook'] ? '🟢 OK' : 'Test Ping'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Secrets Vault Section */}
-              <div className="control-group" style={{ marginTop: 28 }}>
-                <div className="vault-header-block">
-                  <div>
-                    <label className="control-group-title">🔐 Swarm Secrets Vault</label>
-                    <p className="control-group-desc">Tokens are masked by default and never logged in plain text.</p>
-                  </div>
-                  <span className="badge-tag success">AES-256 Encrypted</span>
-                </div>
-
-                <div className="secrets-vault-list">
-                  {/* GitHub Token */}
-                  <div className="secret-item-card">
-                    <div className="secret-label-row">
-                      <label className="field-label">GitHub Personal Access Token (PAT)</label>
-                      {testedSecrets['githubToken'] && (
-                        <span className="secret-valid-badge">✅ {testedSecrets['githubToken']}</span>
-                      )}
-                    </div>
-                    <div className="secret-input-wrap">
-                      <input
-                        type={secretVisibility.githubToken ? 'text' : 'password'}
-                        className="settings-text-input secret-input"
-                        value={formState.secrets.githubToken}
-                        onChange={(e) => updateSection('secrets', 'githubToken', e.target.value)}
-                        placeholder="ghp_••••••••••••••••••••••••"
-                      />
-                      <button
-                        type="button"
-                        className="secret-eye-btn"
-                        onClick={() => setSecretVisibility((prev) => ({ ...prev, githubToken: !prev.githubToken }))}
-                        title={secretVisibility.githubToken ? 'Hide Secret' : 'Show Secret'}
-                      >
-                        {secretVisibility.githubToken ? '🔒 Hide' : '👁️ Show'}
-                      </button>
-                      <button
-                        type="button"
-                        className="secret-test-btn"
-                        disabled={testingSecret === 'githubToken'}
-                        onClick={() => handleTestSecret('githubToken')}
-                      >
-                        {testingSecret === 'githubToken' ? 'Verifying…' : 'Verify'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Docker Key */}
-                  <div className="secret-item-card">
-                    <div className="secret-label-row">
-                      <label className="field-label">Docker Registry Access Token / Key</label>
-                      {testedSecrets['dockerKey'] && (
-                        <span className="secret-valid-badge">✅ {testedSecrets['dockerKey']}</span>
-                      )}
-                    </div>
-                    <div className="secret-input-wrap">
-                      <input
-                        type={secretVisibility.dockerKey ? 'text' : 'password'}
-                        className="settings-text-input secret-input"
-                        value={formState.secrets.dockerKey}
-                        onChange={(e) => updateSection('secrets', 'dockerKey', e.target.value)}
-                        placeholder="dckr_pat_••••••••••••••••••••"
-                      />
-                      <button
-                        type="button"
-                        className="secret-eye-btn"
-                        onClick={() => setSecretVisibility((prev) => ({ ...prev, dockerKey: !prev.dockerKey }))}
-                        title={secretVisibility.dockerKey ? 'Hide Secret' : 'Show Secret'}
-                      >
-                        {secretVisibility.dockerKey ? '🔒 Hide' : '👁️ Show'}
-                      </button>
-                      <button
-                        type="button"
-                        className="secret-test-btn"
-                        disabled={testingSecret === 'dockerKey'}
-                        onClick={() => handleTestSecret('dockerKey')}
-                      >
-                        {testingSecret === 'dockerKey' ? 'Verifying…' : 'Verify'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Webhook Secret */}
-                  <div className="secret-item-card">
-                    <div className="secret-label-row">
-                      <label className="field-label">Webhook HMAC Signing Secret</label>
-                      {testedSecrets['webhookSecret'] && (
-                        <span className="secret-valid-badge">✅ {testedSecrets['webhookSecret']}</span>
-                      )}
-                    </div>
-                    <div className="secret-input-wrap">
-                      <input
-                        type={secretVisibility.webhookSecret ? 'text' : 'password'}
-                        className="settings-text-input secret-input"
-                        value={formState.secrets.webhookSecret}
-                        onChange={(e) => updateSection('secrets', 'webhookSecret', e.target.value)}
-                        placeholder="whsec_••••••••••••••••••••"
-                      />
-                      <button
-                        type="button"
-                        className="secret-eye-btn"
-                        onClick={() => setSecretVisibility((prev) => ({ ...prev, webhookSecret: !prev.webhookSecret }))}
-                        title={secretVisibility.webhookSecret ? 'Hide Secret' : 'Show Secret'}
-                      >
-                        {secretVisibility.webhookSecret ? '🔒 Hide' : '👁️ Show'}
-                      </button>
-                      <button
-                        type="button"
-                        className="secret-test-btn"
-                        disabled={testingSecret === 'webhookSecret'}
-                        onClick={() => handleTestSecret('webhookSecret')}
-                      >
-                        {testingSecret === 'webhookSecret' ? 'Verifying…' : 'Verify'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 9: AUDIT & HISTORY RETENTION */}
-          {activeTab === 'audit' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">COMPLIANCE & TRACEABILITY</span>
-                  <h3>📝 Audit & History Retention</h3>
-                  <p>Configure immutable audit trails, historical log retention schedules, and jump to raw execution logs.</p>
-                </div>
-                <span className="status-pill completed">Audit Active</span>
-              </div>
-
-              {/* Direct Jump to Swarm Logs */}
-              <div className="audit-logs-jump-box">
-                <div className="jump-box-content">
-                  <span className="jump-box-icon">📋</span>
-                  <div>
-                    <h4>Swarm Execution & Audit Logs Console</h4>
-                    <p>Inspect live agent reasoning chains, tool invocations, self-healing events, and stage outputs.</p>
-                  </div>
-                </div>
-                <button className="primary-button jump-logs-btn" onClick={onNavigateToLogs}>
-                  📋 Open Execution Logs →
-                </button>
-              </div>
-
-              {/* Audit Recording Toggles */}
-              <div className="switches-list" style={{ marginTop: 24 }}>
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Record Agent Planning & Tool Calls</label>
-                    <p className="switch-desc">Capture full prompts, LLM responses, and file diffs for forensic analysis.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.audit.recordAgentActions}
-                      onChange={(e) => updateSection('audit', 'recordAgentActions', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Record Self-Healing Root Causes & Patches</label>
-                    <p className="switch-desc">Store failed error signatures, diagnose causes, and save code fixes in DB failure memory.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.audit.recordSelfHealing}
-                      onChange={(e) => updateSection('audit', 'recordSelfHealing', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Record Configuration Changes</label>
-                    <p className="switch-desc">Track operator modifications to swarm settings, approval gates, and credentials.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.audit.recordConfigChanges}
-                      onChange={(e) => updateSection('audit', 'recordConfigChanges', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-
-                <div className="switch-row">
-                  <div>
-                    <label className="switch-title">Record Deployment Manifests & Artifacts</label>
-                    <p className="switch-desc">Log git commit SHAs, container image digests, and target cluster release records.</p>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={formState.audit.recordDeployments}
-                      onChange={(e) => updateSection('audit', 'recordDeployments', e.target.checked)}
-                    />
-                    <span className="toggle-slider" />
-                  </label>
-                </div>
-              </div>
-
-              {/* Retention Schedule Dropdown */}
-              <div className="input-group-row" style={{ marginTop: 20 }}>
-                <div>
-                  <label className="control-group-title">Historical Log Retention Window</label>
-                  <p className="control-group-desc">Logs older than this threshold are pruned from active storage.</p>
-                </div>
-                <select
-                  className="settings-select"
-                  value={formState.audit.retentionDays}
-                  onChange={(e) => updateSection('audit', 'retentionDays', e.target.value)}
-                >
-                  <option value="7 days">7 days (Developer sandbox)</option>
-                  <option value="30 days">30 days (Standard team · Recommended)</option>
-                  <option value="90 days">90 days (Enterprise standard)</option>
-                  <option value="180 days">180 days (Financial compliance)</option>
-                  <option value="1 year">1 year (Extended retention)</option>
-                  <option value="forever">Forever (No automatic pruning)</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 10: WORKSPACE & BACKUP */}
-          {activeTab === 'workspace' && (
-            <div className="settings-section-card">
-              <div className="section-card-header">
-                <div>
-                  <span className="section-category-tag">PREFERENCES & BACKUP</span>
-                  <h3>⚙️ Workspace & Backup Preferences</h3>
-                  <p>Customize UI theme, export or import swarm configuration JSON, and view runtime environment information.</p>
-                </div>
-                <span className="status-pill completed">v2.4 Autonomous</span>
-              </div>
-
-              {/* Theme Customization */}
-              <div className="control-group">
-                <label className="control-group-title">Interface Visual Theme</label>
-                <p className="control-group-desc">Select between dark aerospace HUD or crisp high-contrast light mode.</p>
-                <div className="segmented-control" style={{ maxWidth: 360 }}>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.theme === 'dark' ? 'active' : ''}`}
-                    onClick={() => {
-                      setFormState((prev) => ({ ...prev, theme: 'dark' }))
-                      document.documentElement.dataset.theme = 'dark'
-                      onSaveSettings({ ...formState, theme: 'dark' })
-                    }}
-                  >
-                    <span className="segment-icon">🌙</span>
-                    <div>
-                      <strong>Dark Space</strong>
-                      <small>Mission control HUD</small>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${formState.theme === 'light' ? 'active' : ''}`}
-                    onClick={() => {
-                      setFormState((prev) => ({ ...prev, theme: 'light' }))
-                      document.documentElement.dataset.theme = 'light'
-                      onSaveSettings({ ...formState, theme: 'light' })
-                    }}
-                  >
-                    <span className="segment-icon">☀️</span>
-                    <div>
-                      <strong>Light Studio</strong>
-                      <small>High daylight contrast</small>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Backup & Import Configuration */}
-              <div className="control-group" style={{ marginTop: 24 }}>
-                <label className="control-group-title">Swarm Configuration Backup & Portability</label>
-                <p className="control-group-desc">Export your custom policies to a JSON configuration file or import an existing configuration.</p>
-                <div className="backup-action-buttons">
-                  <button className="secondary-button" onClick={handleExport}>
-                    📥 Export Settings (JSON)
-                  </button>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept=".json"
-                    style={{ display: 'none' }}
-                    onChange={handleImport}
-                  />
-                  <button className="secondary-button" onClick={() => fileInputRef.current?.click()}>
-                    📤 Import Settings (JSON)
-                  </button>
-                </div>
-              </div>
-
-              {/* Reset to Factory Baseline */}
-              <div className="control-group danger-zone-group" style={{ marginTop: 28 }}>
-                <div className="danger-zone-header">
-                  <div>
-                    <label className="control-group-title" style={{ color: '#f87171' }}>⚠️ Factory Defaults Reset</label>
-                    <p className="control-group-desc">Revert all 10 governance policies, quotas, and credentials to initial baseline.</p>
-                  </div>
-                  <button className="danger-button" onClick={handleReset}>
-                    Reset to Factory Defaults
-                  </button>
-                </div>
-              </div>
-
-              {/* Environment Telemetry */}
-              <div className="system-telemetry-card" style={{ marginTop: 24 }}>
-                <div className="telemetry-item">
-                  <span>Active Workspace</span>
-                  <strong>autonomous-devops-swarm</strong>
-                </div>
-                <div className="telemetry-item">
-                  <span>Swarm Engine</span>
-                  <strong>Python 3.12 · FastAPI · React 18 · Vite</strong>
-                </div>
-                <div className="telemetry-item">
-                  <span>Database Layer</span>
-                  <strong>SQLite Failure Memory · User Isolation Active</strong>
-                </div>
-                <div className="telemetry-item">
-                  <span>Specialists Configured</span>
-                  <strong>8 Autonomous Agents (4 Dev + 4 Ops)</strong>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
-  )
-}
 
 function WorkflowSidebar({ pipeline, request, onInspect, onOpenPreview, minimized, expanded, onMinimize, onExpand }) {
   const planning = pipeline?.stages.find((stage) => stage.agent === 'Planning Agent')
@@ -4902,16 +3407,22 @@ function DatabaseScreen({ history, failures, dbStatus, storage, onRefresh, onSel
   const isMongo = dbStatus?.storage_type === 'mongodb' || dbStatus?.status === 'connected'
 
   return (
-    <section className="panel database-screen">
-      <div className="panel-heading">
-        <div>
-          <p className="section-label">MONGODB PERSISTENCE & AUDIT ENGINE</p>
-          <h2>DevOps Pipeline History & Failure Memory</h2>
-        </div>
-        <div className="actions">
-          <button onClick={onRefresh}>🔄 Refresh Database</button>
-        </div>
-      </div>
+    <div className="database-page-wrapper">
+      <PageHeader
+        category="PERSISTENCE & STORAGE HEALTH"
+        title="Database & Storage Health"
+        subtitle="Live database connectivity, pipeline execution history, and persistent failure memory records."
+        badge={{
+          label: isMongo ? `MongoDB Connected (${dbStatus?.ping_ms ?? 0.8}ms)` : 'SQLite Local Engine',
+          variant: isMongo ? 'completed' : 'waiting'
+        }}
+        actions={
+          <button className="secondary-button" onClick={onRefresh}>
+            🔄 Refresh Database
+          </button>
+        }
+      />
+      <section className="panel database-screen">
 
       {/* MongoDB Live Connection Card */}
       <div className="db-conn-card" style={{ marginTop: 18, background: '#0c121e', border: '1px solid #1e293b', borderRadius: 14, padding: 18 }}>
@@ -5085,5 +3596,6 @@ function DatabaseScreen({ history, failures, dbStatus, storage, onRefresh, onSel
         </div>
       )}
     </section>
+    </div>
   )
 }

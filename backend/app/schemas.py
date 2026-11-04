@@ -6,7 +6,6 @@ import re
 from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
-
 EMAIL_REGEX = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
 
 
@@ -111,7 +110,7 @@ class UserSignupRequest(BaseModel):
 
     @field_validator("confirm_password")
     @classmethod
-    def validate_passwords_match(cls, v: str, info) -> str:
+    def validate_passwords_match(cls, v: str, info: Any) -> str:
         password = info.data.get("password")
         if password is not None and v != password:
             raise ValueError("Passwords do not match")
@@ -138,9 +137,16 @@ class UserLoginRequest(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
-    full_name: str | None = None
-    name: str | None = None
     created_at: str
+    full_name: str = ""
+    name: str = ""
+
+    def __init__(self, **data: Any) -> None:
+        if "full_name" in data and not data.get("name"):
+            data["name"] = data["full_name"]
+        elif "name" in data and not data.get("full_name"):
+            data["full_name"] = data["name"]
+        super().__init__(**data)
 
     def model_post_init(self, __context: Any) -> None:
         if not self.full_name and self.name:
@@ -153,4 +159,20 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
-    expires_in: int = 1440
+    expires_in: int = 86400
+
+
+class SettingsUpdateRequest(BaseModel):
+    settings: dict[str, Any] = Field(..., description="Configuration dictionary across all settings sections")
+
+
+class TestConnectionRequest(BaseModel):
+    service: str = Field(..., description="Target service name: github, docker, nvidia, webhook, slack, kubernetes, jenkins")
+    config: dict[str, Any] | None = Field(default=None, description="Optional service configuration overrides")
+
+
+class TestNotificationRequest(BaseModel):
+    channel: str = Field(default="dashboard", description="Notification delivery channel")
+    severity: str = Field(default="critical", description="Alert severity level")
+    target: str | None = Field(default=None, description="Target email, channel or webhook")
+    message: str | None = Field(default=None, description="Custom notification text")

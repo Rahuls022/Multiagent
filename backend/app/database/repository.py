@@ -12,10 +12,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+
+class DuplicateUserError(Exception):
+    """Raised when attempting to create a user with an email that already exists."""
+
 try:
     from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo.errors import DuplicateKeyError
 except ImportError:
     AsyncIOMotorClient = None  # type: ignore[assignment,misc]
+    DuplicateKeyError = None  # type: ignore[assignment,misc]
 
 
 class DuplicateUserError(ValueError):
@@ -761,48 +767,56 @@ def create_pipeline_repository() -> PipelineRepository:
 class UserRepository(Protocol):
     storage_name: str
 
-    async def create_user(self, user_data: dict[str, Any]) -> dict[str, Any]: ...
+    async def create_user(self, user: dict[str, Any]) -> dict[str, Any]: ...
     async def get_by_email(self, email: str) -> dict[str, Any] | None: ...
     async def get_by_id(self, user_id: str) -> dict[str, Any] | None: ...
+    async def list_users(self) -> list[dict[str, Any]]: ...
     async def close(self) -> None: ...
 
 
 class InMemoryUserRepository:
-    """Safe development fallback storing user records in memory."""
-
     storage_name = "in-memory (users)"
 
     def __init__(self) -> None:
-        self._users_by_id: dict[str, dict[str, Any]] = {}
-        self._users_by_email: dict[str, dict[str, Any]] = {}
+        self._users: dict[str, dict[str, Any]] = {}
 
-    async def create_user(self, user_data: dict[str, Any]) -> dict[str, Any]:
-        email_key = user_data["email"].lower().strip()
-        if email_key in self._users_by_email:
-            raise DuplicateUserError(f"User with email '{user_data['email']}' already exists.")
-        user = deepcopy(user_data)
-        user.setdefault("created_at", datetime.now(UTC).isoformat())
-        self._users_by_id[user["id"]] = user
-        self._users_by_email[email_key] = user
-        return deepcopy(user)
+    async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
+        email = user["email"].strip().lower()
+        for existing in self._users.values():
+            if existing["email"].lower() == email:
+                raise DuplicateUserError(f"User with email '{email}' already exists.")
+        doc = deepcopy(user)
+        doc["email"] = email
+        name = doc.get("full_name") or doc.get("name") or ""
+        doc["name"] = name
+        doc["full_name"] = name
+        pw_hash = doc.get("password_hash") or doc.get("hashed_password") or ""
+        doc["password_hash"] = pw_hash
+        doc["hashed_password"] = pw_hash
+        doc.setdefault("created_at", datetime.now(UTC).isoformat())
+        self._users[user["id"]] = doc
+        return deepcopy(doc)
 
     async def get_by_email(self, email: str) -> dict[str, Any] | None:
-        user = self._users_by_email.get(email.lower().strip())
-        return deepcopy(user) if user else None
+        email_clean = email.strip().lower()
+        for user in self._users.values():
+            if user["email"].lower() == email_clean:
+                return deepcopy(user)
+        return None
 
     async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
-        user = self._users_by_id.get(user_id)
+        user = self._users.get(user_id)
         return deepcopy(user) if user else None
 
     async def list_users(self) -> list[dict[str, Any]]:
-        return list(self._users_by_id.values())
+        return [deepcopy(u) for u in self._users.values()]
 
     async def close(self) -> None:
         return None
 
 
 class SqliteUserRepository:
-    """SQLite implementation for local user storage."""
+    """SQLite implementation providing permanent local user persistence."""
 
     storage_name = "sqlite (users)"
 
@@ -815,43 +829,50 @@ class SqliteUserRepository:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
-                    email TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL COLLATE NOCASE,
                     full_name TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT
+                    updated_at TEXT NOT NULL
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
             conn.commit()
 
     async def init_indexes(self) -> None:
         """Indexes are ensured synchronously in _init_db."""
         return None
-
     async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_user_sync, user)
 
     def _create_user_sync(self, user: dict[str, Any]) -> dict[str, Any]:
-        full_name = (user.get("full_name") or user.get("name") or "").strip()
-        password_hash = user.get("password_hash") or user.get("hashed_password") or ""
-        email = user["email"].strip().lower()
-        user_id = user["id"]
-        created_at = user.get("created_at", datetime.now(UTC).isoformat())
-        updated_at = user.get("updated_at", created_at)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             try:
+                full_name = (user.get("full_name") or user.get("name") or "").strip()
+                password_hash = user.get("password_hash") or user.get("hashed_password") or ""
+                now_iso = datetime.now(UTC).isoformat()
+                created_at = user.get("created_at") or now_iso
+                updated_at = user.get("updated_at") or now_iso
                 cursor.execute(
                     "INSERT INTO users (id, email, full_name, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (user_id, email, full_name, password_hash, created_at, updated_at),
+                    (
+                        user["id"],
+                        user["email"].strip().lower(),
+                        full_name,
+                        password_hash,
+                        created_at,
+                        updated_at,
+                    ),
                 )
                 conn.commit()
                 res = deepcopy(user)
-                res.setdefault("full_name", full_name)
-                res.setdefault("name", full_name)
-                res.setdefault("password_hash", password_hash)
-                res.setdefault("hashed_password", password_hash)
+                res["full_name"] = full_name
+                res["name"] = full_name
+                res["password_hash"] = password_hash
+                res["hashed_password"] = password_hash
+                res["created_at"] = created_at
+                res["updated_at"] = updated_at
                 return res
             except sqlite3.IntegrityError as exc:
                 raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
@@ -868,8 +889,10 @@ class SqliteUserRepository:
             if not row:
                 return None
             res = dict(row)
-            res.setdefault("name", res.get("full_name", ""))
-            res.setdefault("hashed_password", res.get("password_hash", ""))
+            res["name"] = res.get("full_name", "")
+            res["full_name"] = res.get("name", res.get("full_name", ""))
+            res["hashed_password"] = res.get("password_hash", "")
+            res["password_hash"] = res.get("hashed_password", "")
             return res
 
     async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
@@ -884,8 +907,10 @@ class SqliteUserRepository:
             if not row:
                 return None
             res = dict(row)
-            res.setdefault("name", res.get("full_name", ""))
-            res.setdefault("hashed_password", res.get("password_hash", ""))
+            res["name"] = res.get("full_name", "")
+            res["full_name"] = res.get("name", res.get("full_name", ""))
+            res["hashed_password"] = res.get("password_hash", "")
+            res["password_hash"] = res.get("hashed_password", "")
             return res
 
     async def list_users(self) -> list[dict[str, Any]]:
@@ -896,13 +921,15 @@ class SqliteUserRepository:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
-            records = []
+            items = []
             for row in cursor.fetchall():
-                r = dict(row)
-                r.setdefault("name", r.get("full_name", ""))
-                r.setdefault("hashed_password", r.get("password_hash", ""))
-                records.append(r)
-            return records
+                res = dict(row)
+                res["name"] = res.get("full_name", "")
+                res["full_name"] = res.get("name", res.get("full_name", ""))
+                res["hashed_password"] = res.get("password_hash", "")
+                res["password_hash"] = res.get("hashed_password", "")
+                items.append(res)
+            return items
 
     async def close(self) -> None:
         return None
@@ -915,7 +942,7 @@ class MongoUserRepository:
 
     def __init__(self, url: str, database_name: str) -> None:
         if AsyncIOMotorClient is None:
-            raise RuntimeError("MongoDB support requires the 'motor' package.")
+            raise RuntimeError("MongoDB support requires the 'motor' package. Install backend requirements first.")
         self.client = AsyncIOMotorClient(url)
         self.db = self.client[database_name]
         self.users_coll = self.db["users"]
@@ -929,30 +956,61 @@ class MongoUserRepository:
     async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
         doc = deepcopy(user)
         doc["email"] = doc["email"].strip().lower()
+        full_name = (doc.get("full_name") or doc.get("name") or "").strip()
+        doc["full_name"] = full_name
+        doc["name"] = full_name
+        pw_hash = doc.get("password_hash") or doc.get("hashed_password") or ""
+        doc["password_hash"] = pw_hash
+        doc["hashed_password"] = pw_hash
         try:
             await self.users_coll.insert_one(doc)
         except Exception as exc:
-            raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
+            if DuplicateKeyError is not None and isinstance(exc, DuplicateKeyError):
+                raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
+            if "duplicate" in str(exc).lower():
+                raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
+            raise
         doc.pop("_id", None)
         return doc
 
     async def get_by_email(self, email: str) -> dict[str, Any] | None:
-        return await self.users_coll.find_one({"email": email.strip().lower()}, {"_id": 0})
+        doc = await self.users_coll.find_one({"email": email.strip().lower()}, {"_id": 0})
+        if doc:
+            doc.setdefault("name", doc.get("full_name", ""))
+            doc.setdefault("full_name", doc.get("name", ""))
+            doc.setdefault("password_hash", doc.get("hashed_password", ""))
+            doc.setdefault("hashed_password", doc.get("password_hash", ""))
+        return doc
 
     async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
-        return await self.users_coll.find_one({"id": user_id}, {"_id": 0})
+        doc = await self.users_coll.find_one({"id": user_id}, {"_id": 0})
+        if doc:
+            doc.setdefault("name", doc.get("full_name", ""))
+            doc.setdefault("full_name", doc.get("name", ""))
+            doc.setdefault("password_hash", doc.get("hashed_password", ""))
+            doc.setdefault("hashed_password", doc.get("password_hash", ""))
+        return doc
 
     async def list_users(self) -> list[dict[str, Any]]:
         cursor = self.users_coll.find({}, {"_id": 0}).sort("created_at", -1)
-        return await cursor.to_list(length=100)
+        users = await cursor.to_list(length=100)
+        for doc in users:
+            doc.setdefault("name", doc.get("full_name", ""))
+            doc.setdefault("full_name", doc.get("name", ""))
+            doc.setdefault("password_hash", doc.get("hashed_password", ""))
+            doc.setdefault("hashed_password", doc.get("password_hash", ""))
+        return users
 
     async def close(self) -> None:
         self.client.close()
 
 
 def create_user_repository() -> UserRepository:
+    """Use MongoDB when configured and reachable; use SQLite for persistent local storage otherwise."""
     mongo_url = os.getenv("MONGODB_URL")
     if mongo_url and _is_mongo_reachable(mongo_url):
-        return MongoUserRepository(mongo_url, os.getenv("MONGODB_DATABASE", "devops_swarm"))
+        try:
+            return MongoUserRepository(mongo_url, os.getenv("MONGODB_DATABASE", "devops_swarm"))
+        except Exception:
+            pass
     return SqliteUserRepository(get_sqlite_db_path())
-

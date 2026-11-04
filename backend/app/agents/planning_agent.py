@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -54,20 +55,52 @@ class PlanningAgent(BaseAgent):
 
         user_prompt = f"Mission Objective: {request}"
 
+        is_offline = os.getenv("LLM_OFFLINE", "0").lower() in ("1", "true", "yes")
+
+        from .project_context import project_context
+        ctx = project_context(request)
+        domain = ctx.get("domain", "generic")
+        req_lower = request.lower()
+        is_web = bool(re.search(
+            r"\b(portal|website|web|frontend|dashboard|ui|login|pages?|student|school|hospital|patient|store|shop|ecommerce|e-commerce)\b",
+            req_lower,
+        ))
+        fallback_supported = is_offline or is_web or (domain != "generic")
+
         plan = {}
-        try:
-            plan = await self.client.create_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.2,
-                max_tokens=2048,
-            )
-        except Exception as exc:
-            import logging
-            logging.getLogger("autonomous_devops.planning").warning(
-                "Planning Agent LLM call encountered error (%s). Synthesizing resilient fallback plan.", exc
-            )
+        if fallback_supported and not getattr(self.client, "is_configured", True):
             plan = self._fallback_plan(request)
+        else:
+            if hasattr(self.client, "verify_configured"):
+                self.client.verify_configured()
+
+            try:
+                plan = await self.client.create_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.2,
+                    max_tokens=2048,
+                )
+            except RuntimeError as exc:
+                if "not configured" in str(exc).lower() or "api key" in str(exc).lower():
+                    raise
+                if fallback_supported:
+                    import logging
+                    logging.getLogger("autonomous_devops.planning").warning(
+                        "Planning Agent LLM call encountered error (%s). Synthesizing resilient fallback plan.", exc
+                    )
+                    plan = self._fallback_plan(request)
+                else:
+                    raise
+            except Exception as exc:
+                if fallback_supported:
+                    import logging
+                    logging.getLogger("autonomous_devops.planning").warning(
+                        "Planning Agent LLM call encountered error (%s). Synthesizing resilient fallback plan.", exc
+                    )
+                    plan = self._fallback_plan(request)
+                else:
+                    raise
 
         if not plan.get("files_to_create"):
             fallback = self._fallback_plan(request)

@@ -2,6 +2,7 @@
 
 from .dependencies import get_current_user, get_optional_user
 from .repository import (
+    DuplicateUserError,
     InMemoryUserRepository,
     MongoUserRepository,
     SqliteUserRepository,
@@ -15,6 +16,7 @@ from .schemas import (
     UserSignupRequest,
     UserResponse,
 )
+from app.schemas import UserSignupRequest
 from .security import (
     create_access_token,
     decode_access_token,
@@ -25,6 +27,8 @@ from .security import (
 __all__ = [
     "get_current_user",
     "get_optional_user",
+    "DuplicateUserError",
+    "SqliteUserRepository",
     "UserRepository",
     "InMemoryUserRepository",
     "MongoUserRepository",

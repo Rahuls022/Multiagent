@@ -74,10 +74,17 @@ class UserLoginRequest(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
-    name: str | None = None
-    full_name: str | None = None
     email: str
     created_at: str
+    name: str = ""
+    full_name: str = ""
+
+    def __init__(self, **data: Any) -> None:
+        if "full_name" in data and not data.get("name"):
+            data["name"] = data["full_name"]
+        elif "name" in data and not data.get("full_name"):
+            data["full_name"] = data["name"]
+        super().__init__(**data)
 
     def model_post_init(self, __context: Any) -> None:
         if not self.full_name and self.name:
@@ -90,4 +97,4 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
-    expires_in: int = 1440
+    expires_in: int = 86400

@@ -8,7 +8,9 @@ from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, status
+from app.database.settings_repository import create_settings_repository
+from app.settings_service import SettingsService
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agents import BaseAgent, DevelopmentSupervisor, GlobalOrchestrator
@@ -79,6 +81,8 @@ async def lifespan(application: FastAPI):
     application.state.pipeline_repository = create_pipeline_repository()
     application.state.user_repository = create_user_repository()
     application.state.preview_manager = PreviewManager()
+    application.state.settings_repository = create_settings_repository()
+    application.state.settings_service = SettingsService(application.state.settings_repository)
     await application.state.pipeline_repository.init()
     if hasattr(application.state.user_repository, "init_indexes"):
         try:
@@ -625,6 +629,88 @@ async def get_telemetry():
     }
 
 
+def get_settings_service(request: Request) -> SettingsService:
+    if not hasattr(request.app.state, "settings_service"):
+        repo = create_settings_repository()
+        request.app.state.settings_repository = repo
+        request.app.state.settings_service = SettingsService(repo)
+    return request.app.state.settings_service
+
+
+# ============================================================================
+# Enterprise DevOps Settings & Audit Endpoints
+# ============================================================================
+
+@app.get("/api/settings")
+async def get_settings(request: Request):
+    """Retrieve persistent enterprise DevOps swarm settings with masked secrets."""
+    service = get_settings_service(request)
+    return await service.get_sanitized_settings()
+
+
+@app.put("/api/settings")
+async def update_settings(request: Request, payload: dict[str, Any] = Body(...)):
+    """Validate and persist updated DevOps settings, preserving existing unmasked secrets."""
+    service = get_settings_service(request)
+    user = await get_optional_user(request)
+    user_id = user["email"] if user else "admin"
+    settings_data = payload.get("settings") if "settings" in payload and isinstance(payload.get("settings"), dict) else payload
+    updated = await service.update_settings(settings_data, user_id=user_id)
+    return updated
+
+
+@app.post("/api/settings/reset")
+async def reset_settings(request: Request):
+    """Reset settings to recommended enterprise factory defaults."""
+    service = get_settings_service(request)
+    user = await get_optional_user(request)
+    user_id = user["email"] if user else "admin"
+    return await service.reset_settings(user_id=user_id)
+
+
+@app.post("/api/settings/test-connection")
+async def test_integration_connection(request: Request, payload: dict[str, Any] = Body(...)):
+    """Perform real connectivity probe against target service (github, docker, nvidia, webhook, slack)."""
+    service = get_settings_service(request)
+    target = payload.get("service", "")
+    config = payload.get("config", {})
+    return await service.test_connection(target, config)
+
+
+@app.post("/api/settings/test-notification")
+async def test_notification(request: Request, payload: dict[str, Any] = Body(...)):
+    """Dispatch a real test notification event and record in audit log."""
+    service = get_settings_service(request)
+    user = await get_optional_user(request)
+    user_id = user["email"] if user else "admin"
+    return await service.test_notification(payload, user_id=user_id)
+
+
+@app.get("/api/settings/audit")
+async def get_audit_trail(request: Request, limit: int = 50):
+    """Retrieve comprehensive enterprise DevOps audit history from settings and pipeline runs."""
+    service = get_settings_service(request)
+    settings_audits = await service.list_audit_events(limit=limit)
+    combined = list(settings_audits)
+
+    # Augment with pipeline history if available
+    try:
+        pipeline_repo = request.app.state.pipeline_repository
+        recent_pipelines = await pipeline_repo.list(limit=25)
+        for p in recent_pipelines:
+            combined.append({
+                "id": f"audit_pipe_{p.get('id', '')}",
+                "timestamp": p.get("created_at") or datetime.now(UTC).isoformat(),
+                "user_id": p.get("user_id") or "anonymous",
+                "action": f"PIPELINE_{p.get('status', 'EXECUTED').upper()}",
+                "section": "Execution & Policies",
+                "details": f"Pipeline Mission: {p.get('request', '')[:50]} (Status: {p.get('status', 'unknown')})",
+            })
+    except Exception:
+        pass
+
+    combined.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+    return combined[:limit]
 # ============================================================================
 # Workspace & File Endpoints
 # ============================================================================

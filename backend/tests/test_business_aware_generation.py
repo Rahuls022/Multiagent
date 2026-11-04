@@ -38,6 +38,7 @@ class TestBusinessAwareGeneration(unittest.TestCase):
         os.environ["LLM_OFFLINE"] = "1"
 
     def tearDown(self):
+        os.environ.pop("LLM_OFFLINE", None)
         for m_id in self.active_missions:
             try:
                 self.preview_mgr.stop_preview(m_id)
