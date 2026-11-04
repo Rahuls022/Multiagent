@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ..base_agent import BaseAgent
@@ -42,7 +43,15 @@ class OperationsSupervisor:
 
 
     async def run_pipeline(self, task: dict[str, Any], development: dict[str, Any]) -> dict[str, Any]:
-        context: dict[str, Any] = {"development": development}
+        workspace = development.get("workspace")
+        if workspace is None and development.get("workspace_path"):
+            from app.tools.workspace import WorkspaceManager
+            workspace = WorkspaceManager(
+                workspace_root=Path(development["workspace_path"]).parent.parent,
+                user_id=task.get("user_id") or "anonymous",
+                mission_id=task["id"],
+            )
+        context: dict[str, Any] = {"development": development, "workspace": workspace}
         stages: list[dict[str, Any]] = []
         logs: list[dict[str, str]] = []
         events: list[dict[str, Any]] = [{"pipeline_id": task["id"], "agent": self.name, "event": "PIPELINE_STARTED", "timestamp": datetime.now(UTC).isoformat()}]

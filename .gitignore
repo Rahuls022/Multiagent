@@ -38,12 +38,9 @@ Thumbs.db
 .idea/
 .gemini/
 
-# Databases (Local runtime databases)
+# Databases and Mission Workspaces
 *.db
 *.sqlite
 *.sqlite3
-
-# Dynamic Workspaces & Scratch Folders
 workspaces/
 backend/workspaces/
-scratch/

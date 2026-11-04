@@ -14,7 +14,18 @@ from app.database import InMemoryPipelineRepository
 class DevelopmentPipelineTests(unittest.TestCase):
     def test_default_pipeline_completes_in_order(self):
         repository = InMemoryPipelineRepository()
-        result = asyncio.run(DevelopmentSupervisor(repository=repository).run_pipeline("Build a student portal"))
+        from app.agents.planning_agent import PlanningAgent
+        from app.agents.coding_agent import CodingAgent
+        from app.agents.build_agent import BuildAgent
+        from app.agents.testing_agent import TestingAgent
+        from tests.test_real_agents import FakeLLMClient
+
+        fake_llm = FakeLLMClient()
+        supervisor = DevelopmentSupervisor(
+            pipeline=[PlanningAgent(client=fake_llm), CodingAgent(client=fake_llm), BuildAgent(), TestingAgent()],
+            repository=repository,
+        )
+        result = asyncio.run(supervisor.run_pipeline("Build a student portal"))
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["progress"], 100)

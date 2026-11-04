@@ -17,7 +17,18 @@ class Test4AgentSwarm(unittest.TestCase):
 
     def test_main_brain_global_orchestration_decomposes_and_delegates(self):
         """Test Agent 1: Main Brain receives request, decomposes into phases, delegates to supervisors, and aggregates results."""
-        orchestrator = GlobalOrchestrator(repository=self.repository)
+        from app.agents.planning_agent import PlanningAgent
+        from app.agents.coding_agent import CodingAgent
+        from app.agents.build_agent import BuildAgent
+        from app.agents.testing_agent import TestingAgent
+        from tests.test_real_agents import FakeLLMClient
+
+        fake_llm = FakeLLMClient()
+        dev_supervisor = DevelopmentSupervisor(
+            pipeline=[PlanningAgent(client=fake_llm), CodingAgent(client=fake_llm), BuildAgent(), TestingAgent()],
+            repository=self.repository,
+        )
+        orchestrator = GlobalOrchestrator(repository=self.repository, development_supervisor=dev_supervisor)
         result = asyncio.run(orchestrator.run_pipeline("Implement authentication service"))
 
         self.assertEqual(result["status"], "completed")
@@ -53,11 +64,16 @@ class Test4AgentSwarm(unittest.TestCase):
                     "events": [{"agent": self.name, "event": "BUILD_COMPLETED"}],
                 }
 
-        from app.agents import SelfHealingAgent
+        from app.agents import SelfHealingAgent, PlanningAgent, CodingAgent, TestingAgent
+        from tests.test_real_agents import FakeLLMClient
+        from tests.test_self_healing_real import HealingLLMClient
+
+        fake_llm = FakeLLMClient()
+        healing_llm = HealingLLMClient(should_succeed=True)
         dev_supervisor = DevelopmentSupervisor(
-            pipeline=[DevelopmentSupervisor().pipeline[0], DevelopmentSupervisor().pipeline[1], FlakyBuildAgent(), DevelopmentSupervisor().pipeline[3]],
+            pipeline=[PlanningAgent(client=fake_llm), CodingAgent(client=fake_llm), FlakyBuildAgent(), TestingAgent()],
             repository=self.repository,
-            healing_agent=SelfHealingAgent(repository=self.repository),
+            healing_agent=SelfHealingAgent(repository=self.repository, client=healing_llm),
         )
         result = asyncio.run(dev_supervisor.run_pipeline("Build microservice"))
 
@@ -85,10 +101,12 @@ class Test4AgentSwarm(unittest.TestCase):
                 }
 
         from app.agents import SelfHealingAgent
+        from tests.test_self_healing_real import HealingLLMClient
+        ops_healing_llm = HealingLLMClient(should_succeed=True)
         ops_supervisor = OperationsSupervisor(
             pipeline=[OperationsSupervisor().pipeline[0], OperationsSupervisor().pipeline[1], FlakyDeployAgent(), OperationsSupervisor().pipeline[3]],
             repository=self.repository,
-            healing_agent=SelfHealingAgent(repository=self.repository),
+            healing_agent=SelfHealingAgent(repository=self.repository, client=ops_healing_llm),
         )
 
         result = asyncio.run(ops_supervisor.run_pipeline({"id": "ops-test-1"}, {}))

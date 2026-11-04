@@ -1,62 +1,89 @@
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+import os
 from pathlib import Path
+import re
 from typing import Any
 from uuid import uuid4
 
 from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).with_name(".env"))
-
-import sqlite3
-
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-
-try:
-    from pymongo.errors import DuplicateKeyError
-except ImportError:
-    DuplicateKeyError = None
 
 from app.agents import BaseAgent, DevelopmentSupervisor, GlobalOrchestrator
 from app.auth import (
-    REMEMBER_ME_EXPIRE_MINUTES,
+    TokenResponse,
+    UserLoginRequest,
+    UserRegisterRequest,
+    UserResponse,
     create_access_token,
+    create_user_repository,
     get_current_user,
+    get_optional_user,
     hash_password,
     verify_password,
 )
-from app.database import DuplicateUserError, create_pipeline_repository, create_user_repository
-from app.schemas import (
-    PipelineRequest,
-    TokenResponse,
-    UserLoginRequest,
-    UserResponse,
-    UserSignupRequest,
-    WorkspaceFileUpdateRequest,
-    WorkspaceGenerateRequest,
-)
-from app.workspace import WorkspaceSecurityError, get_workspace_manager
+from app.database import create_pipeline_repository
+from app.schemas import PipelineRequest
+from app.tools.preview_manager import PreviewManager
+
+load_dotenv(Path(__file__).with_name(".env"))
 
 
-class SimulatedFailingBuildAgent(BaseAgent):
-    """Simulates a compiler environment failure to demonstrate autonomous self-healing."""
-    name = "Build Agent"
+class ControlledBugCodingAgent(BaseAgent):
+    """Writes real code with a controlled bug to verify real failure detection and autonomous self-healing."""
+    name = "Coding Agent"
 
     async def execute(self, task: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        raise RuntimeError("COMPILER_ERROR: Missing C++ build dependencies & header lockfile mismatch in build environment")
+        workspace = context["workspace"]
+        code = (
+            "def calculate_total(items: list[int]) -> int:\n"
+            "    # Intentional defect: subtracting 1 causes test assertion failure\n"
+            "    return sum(items) - 1\n"
+        )
+        test = (
+            "import unittest\n"
+            "from app_logic import calculate_total\n\n"
+            "class TestCalculation(unittest.TestCase):\n"
+            "    def test_calculate_total(self):\n"
+            "        self.assertEqual(calculate_total([10, 20, 30]), 60)\n"
+        )
+        workspace.write_file("app_logic.py", code)
+        workspace.write_file("tests/test_logic.py", test)
+        return {
+            "summary": "Generated module with intentional logic defect to verify autonomous self-healing",
+            "files_written": [
+                {"path": "app_logic.py", "lines": 4},
+                {"path": "tests/test_logic.py", "lines": 7},
+            ],
+            "files_to_create": [
+                {"path": "app_logic.py", "language": "python", "code": code, "purpose": "Calculation module"},
+                {"path": "tests/test_logic.py", "language": "python", "code": test, "purpose": "Unit test suite"},
+            ],
+        }
+
+
+
+# Backward-compatible alias for existing test imports
+SimulatedFailingBuildAgent = ControlledBugCodingAgent
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     application.state.pipeline_repository = create_pipeline_repository()
     application.state.user_repository = create_user_repository()
+    application.state.preview_manager = PreviewManager()
+    await application.state.pipeline_repository.init()
     if hasattr(application.state.user_repository, "init_indexes"):
         try:
             await application.state.user_repository.init_indexes()
         except Exception:
             pass
     yield
+    try:
+        application.state.preview_manager.stop_all()
+    except Exception:
+        pass
     await application.state.pipeline_repository.close()
     await application.state.user_repository.close()
 
@@ -79,370 +106,475 @@ app.add_middleware(
 @app.get("/")
 def root():
     return {
-        "message": "Autonomous DevOps Swarm Backend Running"
+        "message": "Autonomous DevOps Swarm Backend Running",
+        "version": "1.0.0",
     }
 
 
-# ============================================================================
-# Authentication API Endpoints
-# ============================================================================
+@app.get("/api/database/status")
+async def get_database_status(request: Request):
+    """Return live MongoDB connectivity health, collections, document counts, and instructions."""
+    repo = request.app.state.pipeline_repository
+    return await repo.get_status()
 
-@app.post("/api/auth/signup", status_code=status.HTTP_201_CREATED, response_model=TokenResponse)
-async def signup(payload: UserSignupRequest, request: Request):
-    """Register a new user account with secure PBKDF2 password hashing."""
+
+# =====================================================================
+# Authentication & User Safety Routes
+# =====================================================================
+
+@app.post("/api/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(payload: UserRegisterRequest, request: Request):
+    """Register a new user account with salted password hashing and issue a JWT token."""
     user_repo = request.app.state.user_repository
-    clean_email = payload.email.strip().lower()
-
-    existing = await user_repo.get_by_email(clean_email)
+    existing = await user_repo.get_by_email(payload.email)
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email address already exists. Please sign in instead.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"An account with email '{payload.email}' already exists.",
         )
 
     user_id = str(uuid4())
-    now = datetime.now(UTC).isoformat()
-    hashed_password = hash_password(payload.password)
+    now_iso = datetime.now(UTC).isoformat()
+    hashed_pw = hash_password(payload.password)
 
-    user_data = {
+    user_record = {
         "id": user_id,
-        "email": clean_email,
-        "full_name": payload.full_name.strip(),
-        "password_hash": hashed_password,
-        "created_at": now,
-        "updated_at": now,
+        "name": payload.name.strip(),
+        "email": payload.email.lower().strip(),
+        "hashed_password": hashed_pw,
+        "created_at": now_iso,
     }
 
-    duplicate_errors: tuple[type[Exception], ...] = (DuplicateUserError, sqlite3.IntegrityError)
-    if DuplicateKeyError is not None:
-        duplicate_errors = (DuplicateUserError, sqlite3.IntegrityError, DuplicateKeyError)
+    created_user = await user_repo.create_user(user_record)
+    user_response = UserResponse(
+        id=created_user["id"],
+        name=created_user["name"],
+        email=created_user["email"],
+        created_at=created_user["created_at"],
+    )
 
-    try:
-        await user_repo.create_user(user_data)
-    except duplicate_errors as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="An account with this email address already exists.",
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user account.",
-        ) from exc
-
-    token, expires_in = create_access_token({
-        "sub": user_id,
-        "email": clean_email,
-        "name": payload.full_name.strip(),
+    token = create_access_token({
+        "sub": created_user["id"],
+        "email": created_user["email"],
+        "name": created_user["name"],
+        "created_at": created_user["created_at"],
     })
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": expires_in,
-        "user": {
-            "id": user_id,
-            "email": clean_email,
-            "full_name": payload.full_name.strip(),
-            "created_at": now,
-        },
-    }
+    return TokenResponse(access_token=token, token_type="bearer", user=user_response)
 
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 async def login(payload: UserLoginRequest, request: Request):
-    """Authenticate an existing user and return a signed expiring token."""
+    """Authenticate with email and password, returning JWT bearer token."""
     user_repo = request.app.state.user_repository
-    clean_email = payload.email.strip().lower()
-
-    user = await user_repo.get_by_email(clean_email)
-    if not user or not verify_password(payload.password, user.get("password_hash", "")):
+    user = await user_repo.get_by_email(payload.email)
+    if not user or not verify_password(payload.password, user.get("hashed_password", "")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password. Please verify your credentials.",
+            detail="Invalid email or password.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-    expires_delta = timedelta(minutes=REMEMBER_ME_EXPIRE_MINUTES) if payload.remember_me else None
-    token, expires_in = create_access_token(
-        {
-            "sub": user["id"],
-            "email": user["email"],
-            "name": user["full_name"],
-        },
-        expires_delta=expires_delta,
+    user_response = UserResponse(
+        id=user["id"],
+        name=user["name"],
+        email=user["email"],
+        created_at=user["created_at"],
     )
 
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": expires_in,
-        "user": {
-            "id": user["id"],
-            "email": user["email"],
-            "full_name": user["full_name"],
-            "created_at": user["created_at"],
-        },
-    }
+    token = create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "created_at": user["created_at"],
+    })
+
+    return TokenResponse(access_token=token, token_type="bearer", user=user_response)
 
 
 @app.get("/api/auth/me", response_model=UserResponse)
-async def get_me(current_user: dict[str, Any] = Depends(get_current_user)):
-    """Return the profile of the currently authenticated user."""
-    return {
-        "id": current_user["id"],
-        "email": current_user["email"],
-        "full_name": current_user["full_name"],
-        "created_at": current_user["created_at"],
-    }
+async def get_my_profile(current_user: dict[str, Any] = Depends(get_current_user)):
+    """Retrieve current authenticated user profile."""
+    return UserResponse(
+        id=current_user["id"],
+        name=current_user["name"],
+        email=current_user["email"],
+        created_at=current_user["created_at"],
+    )
 
 
-@app.post("/api/auth/logout")
-async def logout(current_user: dict[str, Any] = Depends(get_current_user)):
-    """Acknowledge logout for the authenticated user session."""
-    return {
-        "message": "Signed out successfully.",
-        "user_id": current_user["id"],
-    }
-
-
-# ============================================================================
-# Protected Swarm Pipeline Endpoints
-# ============================================================================
+# =====================================================================
+# Pipeline Routes (with User Data Safety)
+# =====================================================================
 
 @app.post("/api/pipelines/development")
-async def start_development_pipeline(
-    payload: PipelineRequest,
-    request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Run the Sprint 2 development workflow and return its observable history."""
+async def start_development_pipeline(payload: PipelineRequest, request: Request):
+    """Run the development workflow (Planning, Coding, Build, Testing) and return observable history."""
     repo = request.app.state.pipeline_repository
-    task = {
-        "id": str(uuid4()),
-        "request": payload.request,
-        "user_id": current_user["id"],
-        "project_id": payload.project_id,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    return await DevelopmentSupervisor(repository=repo).run_pipeline(payload.request, task=task)
+    user = await get_optional_user(request)
+    user_id = user["id"] if user else (payload.user_id or "anonymous")
+
+    task = payload.to_mission_task(fallback_user_id=user_id)
+    return await DevelopmentSupervisor(repository=repo).run_pipeline(task["request"], task=task)
 
 
 @app.post("/api/pipelines")
-async def start_swarm_pipeline(
-    payload: PipelineRequest,
-    request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Run the observable Sprint 3 development-to-operations swarm."""
+async def start_swarm_pipeline(payload: PipelineRequest, request: Request, background: bool = False):
+    """Run the observable development-to-operations swarm with authenticated user data binding."""
     repo = request.app.state.pipeline_repository
+    user = await get_optional_user(request)
+    user_id = user["id"] if user else (payload.user_id or "anonymous")
+
+    task = payload.to_mission_task(fallback_user_id=user_id)
     dev_supervisor = DevelopmentSupervisor(repository=repo)
-    return await GlobalOrchestrator(repository=repo, development_supervisor=dev_supervisor).run_pipeline(
-        payload.request, user_id=current_user["id"], project_id=payload.project_id
-    )
+    orchestrator = GlobalOrchestrator(repository=repo, development_supervisor=dev_supervisor)
+
+    if background:
+        import asyncio
+        initial_pipeline = orchestrator._result(
+            task, "running", [], [],
+            [{"pipeline_id": task["id"], "agent": "Global Orchestrator", "event": "PIPELINE_STARTED", "timestamp": datetime.now(UTC).isoformat()}],
+            "Planning Agent",
+        )
+        await repo.create(initial_pipeline)
+
+        async def _exec():
+            try:
+                await orchestrator.run_pipeline(task["request"], task=task, user_id=user_id)
+            except Exception:
+                pass
+
+        asyncio.create_task(_exec())
+        return initial_pipeline
+
+    return await orchestrator.run_pipeline(task["request"], task=task, user_id=user_id)
 
 
 @app.post("/api/pipelines/simulate-failure")
-async def simulate_failure_and_self_heal(
-    payload: PipelineRequest,
-    request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Simulate a pipeline build failure to demonstrate autonomous self-healing & DB failure memory persistence."""
+async def simulate_failure_and_self_heal(payload: PipelineRequest, request: Request, background: bool = False):
+    """Run an intentional failure test to demonstrate real failure detection & autonomous self-healing."""
+    from app.agents import BuildAgent, TestingAgent
     repo = request.app.state.pipeline_repository
+    user = await get_optional_user(request)
+    user_id = user["id"] if user else (payload.user_id or "anonymous")
+
+    task = payload.to_mission_task(fallback_user_id=user_id)
+    task["request"] = f"{payload.request} (Self-Healing Verification Test)"
+    
     failing_pipeline = [
-        DevelopmentSupervisor().pipeline[0],  # Planning Agent
-        DevelopmentSupervisor().pipeline[1],  # Coding Agent
-        SimulatedFailingBuildAgent(),         # Simulated Failure Build Agent
-        DevelopmentSupervisor().pipeline[3],  # Testing Agent
+        DevelopmentSupervisor()._resolve_pipeline("")[0],  # Planning Agent
+        ControlledBugCodingAgent(),                        # Writes code with intentional logic defect
+        BuildAgent(),                                      # Build Agent
+        TestingAgent(),                                    # Testing Agent (fails, triggering self-healing)
     ]
     dev_supervisor = DevelopmentSupervisor(pipeline=failing_pipeline, repository=repo)
-    return await GlobalOrchestrator(repository=repo, development_supervisor=dev_supervisor).run_pipeline(
-        payload.request, user_id=current_user["id"], project_id=payload.project_id
-    )
+    orchestrator = GlobalOrchestrator(repository=repo, development_supervisor=dev_supervisor)
+
+    if background:
+        import asyncio
+        initial_pipeline = orchestrator._result(
+            task, "running", [], [],
+            [{"pipeline_id": task["id"], "agent": "Global Orchestrator", "event": "PIPELINE_STARTED", "timestamp": datetime.now(UTC).isoformat()}],
+            "Planning Agent",
+        )
+        await repo.create(initial_pipeline)
+
+        async def _exec():
+            try:
+                await orchestrator.run_pipeline(task["request"], task=task, user_id=user_id)
+            except Exception:
+                pass
+
+        asyncio.create_task(_exec())
+        return initial_pipeline
+
+    return await orchestrator.run_pipeline(task["request"], task=task, user_id=user_id)
+
+
+
 
 
 @app.get("/api/pipelines")
-async def list_pipelines(
-    request: Request,
-    limit: int = 20,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Return recent delivery missions for the dashboard history panel."""
+async def list_pipelines(request: Request, limit: int = 20):
+    """Return recent delivery missions. If user is authenticated, isolates their pipelines to keep user data safe."""
     safe_limit = min(max(limit, 1), 100)
     repository = request.app.state.pipeline_repository
-    return {"storage": repository.storage_name, "pipelines": await repository.list(safe_limit)}
+    user = await get_optional_user(request)
+    user_id = user["id"] if user else None
+
+    pipelines = await repository.list(safe_limit, user_id=user_id)
+    return {
+        "storage": repository.storage_name,
+        "user_isolated": bool(user_id),
+        "pipelines": pipelines,
+    }
 
 
 @app.get("/api/failures")
-async def list_failures(
-    request: Request,
-    limit: int = 50,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
+async def list_failures(request: Request, limit: int = 50):
     """Return stored failure memory and self-healing resolution logs from Database."""
     repository = request.app.state.pipeline_repository
     failures = await repository.list_failure_memory(limit)
     return {
         "storage": repository.storage_name,
         "total_failures_healed": len(failures),
-        "failures": failures
+        "failures": failures,
     }
 
 
 @app.get("/api/pipelines/{pipeline_id}")
-async def get_pipeline(
-    pipeline_id: str,
-    request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
+async def get_pipeline(pipeline_id: str, request: Request):
     pipeline = await request.app.state.pipeline_repository.get(pipeline_id)
     if pipeline is None:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     return pipeline
 
 
-# ============================================================================
-# Protected Project Workspace & Real File Endpoints
-# ============================================================================
-
-@app.get("/api/workspace/projects")
-async def list_workspace_projects(
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """List all project workspaces belonging to the authenticated user."""
-    workspace_mgr = get_workspace_manager()
-    return {"projects": workspace_mgr.list_projects(current_user["id"])}
+@app.post("/api/pipelines/{pipeline_id}/approve")
+async def approve_pipeline(pipeline_id: str, request: Request):
+    """Operator approval gate to unblock production deployment."""
+    repo = request.app.state.pipeline_repository
+    supervisor = DevelopmentSupervisor(repository=repo)
+    result = await supervisor.approve_pipeline(pipeline_id)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or not awaiting approval.")
+    return {"status": "approved", "pipeline": result}
 
 
-@app.post("/api/workspace/projects")
-async def create_workspace_project(
-    payload: dict[str, str],
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Create a new project workspace for the user."""
-    project_id = payload.get("project_id") or payload.get("name") or "new_project"
-    workspace_mgr = get_workspace_manager()
+@app.post("/api/pipelines/{pipeline_id}/reject")
+async def reject_pipeline(pipeline_id: str, request: Request):
+    """Operator rejection gate to cancel production deployment."""
+    repo = request.app.state.pipeline_repository
+    body = {}
     try:
-        project_dir = workspace_mgr.get_project_dir(current_user["id"], project_id, create=True)
-        safe_rel_path = None
-        try:
-            safe_rel_path = project_dir.relative_to(workspace_mgr.root_dir).as_posix()
-        except ValueError:
-            safe_rel_path = None
+        body = await request.json()
+    except Exception:
+        pass
+    reason = body.get("reason", "Operator rejected") if isinstance(body, dict) else "Operator rejected"
 
-        response: dict[str, Any] = {
-            "project_id": project_dir.name,
-            "message": f"Workspace initialized for project '{project_dir.name}'",
-        }
-        if safe_rel_path is not None:
-            response["path"] = safe_rel_path
-        return response
-    except WorkspaceSecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    supervisor = DevelopmentSupervisor(repository=repo)
+    result = await supervisor.reject_pipeline(pipeline_id, reason=reason)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found.")
+    return {"status": "cancelled", "reason": reason, "pipeline": result}
 
 
-@app.get("/api/workspace/files")
-async def list_workspace_files(
-    project_id: str = Query("project_default", description="Project workspace identifier"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """List all real source files in a specific project workspace."""
-    workspace_mgr = get_workspace_manager()
+@app.post("/api/pipelines/{pipeline_id}/resume")
+async def resume_pipeline(pipeline_id: str, request: Request):
+    """Crash recovery: Resume execution of an interrupted or failed pipeline from where it stopped."""
+    repo = request.app.state.pipeline_repository
+    supervisor = DevelopmentSupervisor(repository=repo)
     try:
-        files = workspace_mgr.list_files(current_user["id"], project_id)
-        return {
-            "project_id": project_id,
-            "total_files": len(files),
-            "files": files,
-        }
-    except WorkspaceSecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        result = await supervisor.resume_pipeline(pipeline_id)
+        return {"status": "resumed", "pipeline": result}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/workspace/structure")
-async def get_workspace_structure(
-    project_id: str = Query("project_default", description="Project workspace identifier"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Return the hierarchical directory tree of the project workspace."""
-    workspace_mgr = get_workspace_manager()
-    try:
-        return workspace_mgr.get_structure(current_user["id"], project_id)
-    except WorkspaceSecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@app.get("/api/workspace/file")
-async def read_workspace_file(
-    path: str = Query(..., description="Relative path of file"),
-    project_id: str = Query("project_default", description="Project workspace identifier"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Read actual file contents from the project workspace."""
-    workspace_mgr = get_workspace_manager()
-    try:
-        return workspace_mgr.read_file(current_user["id"], project_id, path)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except WorkspaceSecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@app.put("/api/workspace/file")
-async def update_workspace_file(
-    payload: WorkspaceFileUpdateRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Update or create a file in the project workspace."""
-    workspace_mgr = get_workspace_manager()
-    try:
-        result = workspace_mgr.write_file(
-            user_id=current_user["id"],
-            project_id=payload.project_id,
-            relative_path=payload.path,
-            content=payload.content,
-        )
-        return result
-    except WorkspaceSecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@app.delete("/api/workspace/file")
-async def delete_workspace_file(
-    path: str = Query(..., description="Relative path of file to delete"),
-    project_id: str = Query("project_default", description="Project workspace identifier"),
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Delete a file from the project workspace."""
-    workspace_mgr = get_workspace_manager()
-    try:
-        workspace_mgr.delete_file(current_user["id"], project_id, path)
-        return {"deleted": True, "path": path}
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except WorkspaceSecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@app.post("/api/workspace/generate")
-async def direct_generate_workspace_code(
-    payload: WorkspaceGenerateRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-):
-    """Directly execute Planning and Coding Agent to generate project files in workspace."""
-    from app.agents import PlanningAgent, CodingAgent
-    task = {
-        "id": str(uuid4()),
-        "request": payload.request,
-        "user_id": current_user["id"],
-        "project_id": payload.project_id,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    context: dict[str, Any] = {}
-    plan_stage = await PlanningAgent().run(task, context)
-    context["Planning Agent"] = plan_stage
-    code_stage = await CodingAgent().run(task, context)
+@app.get("/api/telemetry")
+async def get_telemetry():
+    """Return aggregated LLM token usage, request counts, latency, and estimated cost."""
+    from app.llm import LLMClient
+    client = LLMClient()
+    metrics = client.get_metrics()
     return {
-        "plan": plan_stage,
-        "coding": code_stage,
+        "provider": client.provider_name,
+        "model": client.model,
+        "configured": client.is_configured,
+        "metrics": metrics,
     }
+
+
+# =====================================================================
+# Live Website Preview & Mission Workspace APIs
+# =====================================================================
+
+def _resolve_mission_workspace_dir(pipeline_id: str, pipeline_doc: dict[str, Any] | None = None) -> Path:
+    """Safely locate the mission workspace directory on disk."""
+    preview_mgr = PreviewManager()
+    server = preview_mgr.get_server(pipeline_id)
+    if server and server.workspace_dir and server.workspace_dir.exists():
+        return server.workspace_dir.resolve()
+
+    if pipeline_doc:
+        ws_p = pipeline_doc.get("workspace_path") or pipeline_doc.get("teams", {}).get("development", {}).get("workspace_path")
+        if ws_p:
+            p = Path(ws_p).resolve()
+            if p.exists() and p.is_dir():
+                return p
+
+    ws_root = Path(os.getenv("WORKSPACE_ROOT", Path(__file__).resolve().parent / "workspaces")).resolve()
+    safe_mission = re.sub(r"[^a-zA-Z0-9_\-]", "_", pipeline_id)
+
+    if ws_root.exists():
+        # Search all user folders for this mission
+        matches = list(ws_root.glob(f"*/{safe_mission}"))
+        if matches and matches[0].is_dir():
+            return matches[0].resolve()
+        if (ws_root / safe_mission).is_dir():
+            return (ws_root / safe_mission).resolve()
+
+    # Default fallback
+    target = ws_root / "anonymous" / safe_mission
+    target.mkdir(parents=True, exist_ok=True)
+    return target.resolve()
+
+
+@app.get("/api/pipelines/{pipeline_id}/preview/files")
+async def list_preview_files(pipeline_id: str, request: Request):
+    """List real files generated in the mission workspace with structure and categories."""
+    repo = getattr(request.app.state, "pipeline_repository", None) or create_pipeline_repository()
+    pipeline_doc = None
+    try:
+        if hasattr(repo, "get"):
+            pipeline_doc = await repo.get(pipeline_id)
+    except Exception:
+        pipeline_doc = None
+    ws_dir = _resolve_mission_workspace_dir(pipeline_id, pipeline_doc)
+
+    preview_mgr = getattr(request.app.state, "preview_manager", None) or PreviewManager()
+    files = preview_mgr.list_workspace_files(ws_dir)
+    detection = preview_mgr.detect_frontend(ws_dir)
+
+    categories = {
+        "frontend": [f for f in files if f.get("category") == "frontend"],
+        "backend": [f for f in files if f.get("category") == "backend"],
+        "database": [f for f in files if f.get("category") == "database"],
+        "tests": [f for f in files if f.get("category") == "tests"],
+        "config": [f for f in files if f.get("category") == "config"],
+        "devops": [f for f in files if f.get("category") == "devops"],
+        "other": [f for f in files if f.get("category") not in ("frontend", "backend", "database", "tests", "config", "devops")],
+    }
+    return {
+        "pipeline_id": pipeline_id,
+        "mission_id": pipeline_id,
+        "workspace_path": str(ws_dir),
+        "framework": detection.get("framework", "HTML5 / Web App"),
+        "entry_point": detection.get("entry_point", "index.html"),
+        "files": files,
+        "categories": categories,
+        "total_files": len([f for f in files if not f["is_dir"]]),
+    }
+
+
+@app.get("/api/pipelines/{pipeline_id}/preview/file")
+async def read_preview_file(pipeline_id: str, path: str, request: Request):
+    """Read actual source file content with syntax metadata, protecting against path traversal."""
+    if not path or not path.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'path' is required.")
+
+    repo = getattr(request.app.state, "pipeline_repository", None) or create_pipeline_repository()
+    pipeline_doc = None
+    try:
+        if hasattr(repo, "get"):
+            pipeline_doc = await repo.get(pipeline_id)
+    except Exception:
+        pipeline_doc = None
+    ws_dir = _resolve_mission_workspace_dir(pipeline_id, pipeline_doc)
+
+    preview_mgr = getattr(request.app.state, "preview_manager", None) or PreviewManager()
+    try:
+        file_info = preview_mgr.read_workspace_file(ws_dir, path)
+        file_info["pipeline_id"] = pipeline_id
+        return file_info
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {exc}") from exc
+
+
+@app.post("/api/pipelines/{pipeline_id}/preview/start")
+async def start_mission_preview(pipeline_id: str, request: Request):
+    """Start the mission-specific preview server process and return the live URL."""
+    repo = getattr(request.app.state, "pipeline_repository", None) or create_pipeline_repository()
+    user = await get_optional_user(request)
+    user_id = user["id"] if user else "anonymous"
+
+    pipeline_doc = None
+    try:
+        if hasattr(repo, "get"):
+            pipeline_doc = await repo.get(pipeline_id)
+    except Exception:
+        pipeline_doc = None
+    ws_dir = _resolve_mission_workspace_dir(pipeline_id, pipeline_doc)
+
+    preview_mgr = getattr(request.app.state, "preview_manager", None) or PreviewManager()
+    try:
+        result = preview_mgr.start_preview(
+            mission_id=pipeline_id,
+            workspace_dir=ws_dir,
+            user_id=user_id,
+            timeout_seconds=12.0,
+        )
+
+        # Persist preview metadata in database
+        if hasattr(repo, "save_preview_metadata"):
+            db_record = {
+                "mission_id": pipeline_id,
+                "workspace_path": str(ws_dir),
+                "preview_url": result["preview_url"],
+                "port": result["port"],
+                "process_id": result["pid"],
+                "preview_status": "running",
+                "framework": result["framework"],
+                "entry_point": result["entry_point"],
+            }
+            try:
+                await repo.save_preview_metadata(db_record)
+            except Exception:
+                pass
+
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to start preview server: {exc}") from exc
+
+
+@app.get("/api/pipelines/{pipeline_id}/preview/status")
+async def get_mission_preview_status(pipeline_id: str, request: Request):
+    """Get status of the mission preview server."""
+    preview_mgr = getattr(request.app.state, "preview_manager", None) or PreviewManager()
+    status = preview_mgr.get_status(pipeline_id)
+
+    # If stopped in memory, check if database has record
+    if status["status"] == "stopped":
+        repo = getattr(request.app.state, "pipeline_repository", None) or create_pipeline_repository()
+        if hasattr(repo, "get_preview_metadata"):
+            try:
+                db_meta = await repo.get_preview_metadata(pipeline_id)
+                if db_meta:
+                    status["framework"] = db_meta.get("framework") or status.get("framework")
+                    status["entry_point"] = db_meta.get("entry_point") or status.get("entry_point")
+            except Exception:
+                pass
+
+    return status
+
+
+@app.get("/api/pipelines/{pipeline_id}/preview/logs")
+async def get_mission_preview_logs(pipeline_id: str, request: Request):
+    """Retrieve collected preview startup and runtime logs."""
+    preview_mgr = getattr(request.app.state, "preview_manager", None) or PreviewManager()
+    logs = preview_mgr.get_logs(pipeline_id)
+    return {"mission_id": pipeline_id, "logs": logs}
+
+
+@app.post("/api/pipelines/{pipeline_id}/preview/stop")
+async def stop_mission_preview(pipeline_id: str, request: Request):
+    """Stop the mission preview server process."""
+    preview_mgr = getattr(request.app.state, "preview_manager", None) or PreviewManager()
+    result = preview_mgr.stop_preview(pipeline_id)
+
+    repo = getattr(request.app.state, "pipeline_repository", None) or create_pipeline_repository()
+    if hasattr(repo, "save_preview_metadata"):
+        try:
+            await repo.save_preview_metadata({
+                "mission_id": pipeline_id,
+                "preview_status": "stopped",
+            })
+        except Exception:
+            pass
+
+    return result
+
