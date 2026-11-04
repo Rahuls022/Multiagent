@@ -55,32 +55,44 @@ class SkillRegistry:
 
     def _resolve_skills_dir(self, custom_path: Path | str | None) -> Path:
         if custom_path:
-            p = Path(custom_path)
-            if p.exists():
+            p = Path(custom_path).resolve()
+            if p.exists() and p.is_dir():
                 return p
 
-        # Check repository root .agents/skills
+        # Check environment variables
+        for env_var in ("SKILLS_DIR", "AGENT_SKILLS_DIR", "SWARM_SKILLS_DIR"):
+            env_val = os.getenv(env_var)
+            if env_val:
+                p = Path(env_val).resolve()
+                if p.exists() and p.is_dir():
+                    return p
+
+        # Check all parents from current file location up to filesystem root
         current = Path(__file__).resolve()
-        for parent in [current.parent, current.parent.parent, current.parent.parent.parent]:
+        for parent in [current.parent, *current.parents]:
             candidate = parent / ".agents" / "skills"
             if candidate.exists() and candidate.is_dir():
                 return candidate
 
-        # Workspace relative
-        cwd_candidate = Path.cwd() / ".agents" / "skills"
-        if cwd_candidate.exists():
-            return cwd_candidate
+        # Check current working directory and all its parents
+        cwd = Path.cwd().resolve()
+        for p in [cwd, *cwd.parents]:
+            candidate = p / ".agents" / "skills"
+            if candidate.exists() and candidate.is_dir():
+                return candidate
 
-        return Path(".agents/skills")
+        return (current.parent.parent.parent.parent / ".agents" / "skills").resolve()
 
     def reload(self) -> None:
         """Scan skills_dir and load all SKILL.md definitions."""
         self._skills.clear()
         if not self.skills_dir.exists():
-            logger.warning("Skills directory does not exist: %s", self.skills_dir)
-            return
+            self.skills_dir = self._resolve_skills_dir(None)
+            if not self.skills_dir.exists():
+                logger.warning("Skills directory does not exist: %s", self.skills_dir)
+                return
 
-        for child in self.skills_dir.iterdir():
+        for child in sorted(self.skills_dir.iterdir()):
             if child.is_dir():
                 skill_file = child / "SKILL.md"
                 if skill_file.is_file():
@@ -138,9 +150,11 @@ class SkillRegistry:
             return ""
 
         name = skill.name
+        desc_line = f"Skill Description: {skill.description}\n" if skill.description else ""
         if name == "writing-plans":
             return (
                 "\n--- [APPLIED AGENT SKILL: writing-plans] ---\n"
+                f"{desc_line}"
                 "You are operating with the 'writing-plans' skill from skills.sh:\n"
                 "1. Structure implementation plan for zero-context executor with bite-sized, testable tasks.\n"
                 "2. Explicit File Structure: Map all files created/modified with single responsibilities.\n"
@@ -152,6 +166,7 @@ class SkillRegistry:
         elif name == "frontend-design":
             return (
                 "\n--- [APPLIED AGENT SKILL: frontend-design] ---\n"
+                f"{desc_line}"
                 "You are operating with the 'frontend-design' skill from skills.sh:\n"
                 "1. Ground designs in subject matter: Extract domain, industry, and materials. Do NOT use generic AI templates.\n"
                 "2. Distinctive Visual Identity: Deliberate typography, intentional palette (CSS variables), characteristic hero.\n"
@@ -163,6 +178,7 @@ class SkillRegistry:
         elif name == "systematic-debugging":
             return (
                 "\n--- [APPLIED AGENT SKILL: systematic-debugging] ---\n"
+                f"{desc_line}"
                 "You are operating with the 'systematic-debugging' skill from skills.sh:\n"
                 "1. The Iron Law: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST.\n"
                 "2. Read all compiler and AST error messages completely; note line numbers and exact tokens.\n"
@@ -172,6 +188,7 @@ class SkillRegistry:
         elif name == "verification-before-completion":
             return (
                 "\n--- [APPLIED AGENT SKILL: verification-before-completion] ---\n"
+                f"{desc_line}"
                 "You are operating with the 'verification-before-completion' skill from skills.sh:\n"
                 "1. The Iron Law: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.\n"
                 "2. Identify verification command (e.g. python -m unittest discover -v).\n"
@@ -181,7 +198,7 @@ class SkillRegistry:
             )
 
         # Fallback to general instructions snippet
-        return f"\n--- [APPLIED AGENT SKILL: {name}] ---\n{skill.instructions[:600]}\n-----------------------------------\n"
+        return f"\n--- [APPLIED AGENT SKILL: {name}] ---\n{desc_line}{skill.instructions[:600]}\n-----------------------------------\n"
 
     def list_available_skills(self) -> list[dict[str, Any]]:
         return [
@@ -201,9 +218,10 @@ class SkillRegistry:
 _instance: SkillRegistry | None = None
 
 
-def get_skill_registry() -> SkillRegistry:
+def get_skill_registry(reload: bool = False) -> SkillRegistry:
     global _instance
     if _instance is None:
         _instance = SkillRegistry()
+    elif reload or len(_instance._skills) == 0:
+        _instance.reload()
     return _instance
-
