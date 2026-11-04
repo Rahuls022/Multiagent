@@ -1,3 +1,4 @@
+
 import asyncio
 import unittest
 
@@ -7,14 +8,20 @@ from app.database import InMemoryPipelineRepository
 from main import SimulatedFailingBuildAgent
 
 
+from app.agents.base_agent import BaseAgent
+from tests.test_self_healing_real import HealingLLMClient
+
+
 class SelfHealingSystemTests(unittest.TestCase):
     def test_self_healing_agent_heals_failed_stage_and_saves_to_db(self):
         repository = InMemoryPipelineRepository()
-        healing_agent = SelfHealingAgent(repository=repository)
+        client = HealingLLMClient(should_succeed=True)
+        healing_agent = SelfHealingAgent(repository=repository, client=client)
         
         failed_stage = {
             "agent": "Build Agent",
             "status": "failed",
+            "error": "COMPILER_ERROR: Missing headers",
             "output": {"error": "COMPILER_ERROR: Missing headers"},
             "logs": [],
             "events": [],
@@ -33,9 +40,15 @@ class SelfHealingSystemTests(unittest.TestCase):
         self.assertEqual(failures[0]["status"], "healed")
 
     def test_supervisor_autonomously_recovers_simulated_failure(self):
+        class FailingAgent(BaseAgent):
+            name = "Build Agent"
+            async def execute(self, task, context):
+                raise RuntimeError("COMPILER_ERROR: Simulated build failure")
+
         repository = InMemoryPipelineRepository()
-        failing_pipeline = [SimulatedFailingBuildAgent()]
-        healing_agent = SelfHealingAgent(repository=repository)
+        failing_pipeline = [FailingAgent()]
+        client = HealingLLMClient(should_succeed=True)
+        healing_agent = SelfHealingAgent(repository=repository, client=client)
         
         supervisor = DevelopmentSupervisor(
             pipeline=failing_pipeline,

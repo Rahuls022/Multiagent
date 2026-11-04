@@ -10,7 +10,19 @@ from app.database import InMemoryPipelineRepository
 class Sprint3PipelineTests(unittest.TestCase):
     def test_full_swarm_completes_in_development_then_operations_order(self):
         repository = InMemoryPipelineRepository()
-        result = asyncio.run(GlobalOrchestrator(repository=repository).run_pipeline("Build an observable portal"))
+        from app.agents.planning_agent import PlanningAgent
+        from app.agents.coding_agent import CodingAgent
+        from app.agents.build_agent import BuildAgent
+        from app.agents.testing_agent import TestingAgent
+        from tests.test_real_agents import FakeLLMClient
+
+        fake_llm = FakeLLMClient()
+        dev_supervisor = DevelopmentSupervisor(
+            pipeline=[PlanningAgent(client=fake_llm), CodingAgent(client=fake_llm), BuildAgent(), TestingAgent()],
+            repository=repository,
+        )
+        orchestrator = GlobalOrchestrator(repository=repository, development_supervisor=dev_supervisor)
+        result = asyncio.run(orchestrator.run_pipeline("Build an observable portal"))
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["progress"], 100)

@@ -37,3 +37,10 @@ Thumbs.db
 .vscode/
 .idea/
 .gemini/
+
+# Databases and Mission Workspaces
+*.db
+*.sqlite
+*.sqlite3
+workspaces/
+backend/workspaces/
