@@ -338,12 +338,60 @@ async def login(payload: UserLoginRequest, request: Request):
     )
 
 
+@app.post("/api/auth/demo", response_model=TokenResponse)
+async def demo_login(request: Request):
+    """Instant demo access for exhibitions and quick evaluation."""
+    user_repo = request.app.state.user_repository
+    demo_email = "alex.morgan@swarm.dev"
+    user = await user_repo.get_by_email(demo_email)
+    now = datetime.now(UTC).isoformat()
+    if not user:
+        user_id = "demo-lead-1"
+        user_record = {
+            "id": user_id,
+            "email": demo_email,
+            "full_name": "Alex Morgan",
+            "name": "Alex Morgan",
+            "password_hash": hash_password("demo123"),
+            "hashed_password": hash_password("demo123"),
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            await user_repo.create_user(user_record)
+        except Exception:
+            pass
+        user = await user_repo.get_by_email(demo_email) or user_record
+
+    user_name = user.get("full_name") or user.get("name") or "Alex Morgan"
+    token = create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "name": user_name,
+        "full_name": user_name,
+        "created_at": user.get("created_at") or now,
+    })
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        expires_in=86400 * 7,
+        user=UserResponse(
+            id=user["id"],
+            name=user_name,
+            full_name=user_name,
+            email=user["email"],
+            created_at=user.get("created_at") or now,
+        ),
+    )
+
+
 @app.post("/api/auth/logout")
-async def logout(current_user: dict[str, Any] = Depends(get_current_user)):
+async def logout(request: Request):
     """Acknowledge logout for the authenticated user session."""
+    user = await get_optional_user(request)
     return {
         "message": "Signed out successfully.",
-        "user_id": current_user["id"],
+        "user_id": user["id"] if user else None,
     }
 
 

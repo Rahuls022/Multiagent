@@ -1,4 +1,4 @@
-"""User repository implementation supporting MongoDB and in-memory development fallback."""
+"""User repository implementation supporting SQLite, MongoDB, and in-memory development fallback."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ try:
     from motor.motor_asyncio import AsyncIOMotorClient
 except ImportError:
     AsyncIOMotorClient = None  # type: ignore[assignment,misc]
+
+from app.database.repository import SqliteUserRepository, get_sqlite_db_path
 
 
 class UserRepository(Protocol):
@@ -91,7 +93,7 @@ class MongoUserRepository:
 
 
 def create_user_repository() -> UserRepository:
-    """Create MongoDB or InMemory user repository based on environment."""
+    """Create MongoDB or Sqlite user repository based on environment."""
     mongo_url = os.getenv("MONGODB_URL")
     if mongo_url:
         try:
@@ -100,4 +102,14 @@ def create_user_repository() -> UserRepository:
                 return MongoUserRepository(mongo_url, os.getenv("MONGODB_DATABASE", "devops_swarm"))
         except Exception:
             pass
-    return InMemoryUserRepository()
+    return SqliteUserRepository(get_sqlite_db_path())
+
+
+__all__ = [
+    "UserRepository",
+    "InMemoryUserRepository",
+    "MongoUserRepository",
+    "SqliteUserRepository",
+    "create_user_repository",
+    "get_sqlite_db_path",
+]

@@ -720,6 +720,22 @@ def _is_mongo_reachable(url: str, timeout_ms: int = 400) -> bool:
         return False
 
 
+def get_sqlite_db_path() -> str:
+    """Return the absolute path to the SQLite devops_swarm.db file."""
+    env_path = os.getenv("SQLITE_DATABASE_PATH") or os.getenv("SQLITE_DB_PATH")
+    if env_path:
+        p = Path(env_path)
+        if p.is_absolute():
+            return str(p)
+        if p.exists():
+            return str(p.resolve())
+        backend_p = Path(__file__).resolve().parent.parent.parent / env_path
+        if backend_p.exists():
+            return str(backend_p.resolve())
+        return str((Path(__file__).resolve().parent.parent.parent / env_path).resolve())
+    return str((Path(__file__).resolve().parent.parent.parent / "devops_swarm.db").resolve())
+
+
 def create_pipeline_repository() -> PipelineRepository:
     """Select persistence engine: MongoDB if configured and reachable, else SQLite."""
     try:
@@ -730,7 +746,7 @@ def create_pipeline_repository() -> PipelineRepository:
 
     mongo_url = os.getenv("MONGODB_URL")
     use_sqlite = os.getenv("USE_SQLITE", "false").lower() in ("true", "1", "yes")
-    sqlite_path = os.getenv("SQLITE_DB_PATH", "devops_swarm.db")
+    sqlite_path = get_sqlite_db_path()
 
     if mongo_url and not use_sqlite:
         if _is_mongo_reachable(mongo_url):
@@ -809,26 +825,34 @@ class SqliteUserRepository:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
             conn.commit()
 
+    async def init_indexes(self) -> None:
+        """Indexes are ensured synchronously in _init_db."""
+        return None
+
     async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_user_sync, user)
 
     def _create_user_sync(self, user: dict[str, Any]) -> dict[str, Any]:
+        full_name = (user.get("full_name") or user.get("name") or "").strip()
+        password_hash = user.get("password_hash") or user.get("hashed_password") or ""
+        email = user["email"].strip().lower()
+        user_id = user["id"]
+        created_at = user.get("created_at", datetime.now(UTC).isoformat())
+        updated_at = user.get("updated_at", created_at)
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             try:
                 cursor.execute(
                     "INSERT INTO users (id, email, full_name, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        user["id"],
-                        user["email"].strip().lower(),
-                        user["full_name"].strip(),
-                        user["password_hash"],
-                        user.get("created_at", datetime.now(UTC).isoformat()),
-                        user.get("updated_at", datetime.now(UTC).isoformat()),
-                    ),
+                    (user_id, email, full_name, password_hash, created_at, updated_at),
                 )
                 conn.commit()
-                return deepcopy(user)
+                res = deepcopy(user)
+                res.setdefault("full_name", full_name)
+                res.setdefault("name", full_name)
+                res.setdefault("password_hash", password_hash)
+                res.setdefault("hashed_password", password_hash)
+                return res
             except sqlite3.IntegrityError as exc:
                 raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
 
@@ -841,7 +865,12 @@ class SqliteUserRepository:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE email = ? COLLATE NOCASE", (email.strip().lower(),))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            res = dict(row)
+            res.setdefault("name", res.get("full_name", ""))
+            res.setdefault("hashed_password", res.get("password_hash", ""))
+            return res
 
     async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
         return await asyncio.to_thread(self._get_by_id_sync, user_id)
@@ -852,7 +881,12 @@ class SqliteUserRepository:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            res = dict(row)
+            res.setdefault("name", res.get("full_name", ""))
+            res.setdefault("hashed_password", res.get("password_hash", ""))
+            return res
 
     async def list_users(self) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._list_users_sync)
@@ -862,7 +896,13 @@ class SqliteUserRepository:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
-            return [dict(row) for row in cursor.fetchall()]
+            records = []
+            for row in cursor.fetchall():
+                r = dict(row)
+                r.setdefault("name", r.get("full_name", ""))
+                r.setdefault("hashed_password", r.get("password_hash", ""))
+                records.append(r)
+            return records
 
     async def close(self) -> None:
         return None
@@ -914,7 +954,5 @@ def create_user_repository() -> UserRepository:
     mongo_url = os.getenv("MONGODB_URL")
     if mongo_url and _is_mongo_reachable(mongo_url):
         return MongoUserRepository(mongo_url, os.getenv("MONGODB_DATABASE", "devops_swarm"))
-    default_db_path = str(Path(__file__).resolve().parent.parent.parent / "devops_swarm.db")
-    db_path = os.getenv("SQLITE_DATABASE_PATH", default_db_path)
-    return SqliteUserRepository(db_path)
+    return SqliteUserRepository(get_sqlite_db_path())
 

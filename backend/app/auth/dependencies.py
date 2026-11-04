@@ -53,6 +53,8 @@ async def get_current_user(
     user_repo = getattr(request.app.state, "user_repository", None)
     if user_repo is not None:
         user = await user_repo.get_by_id(user_id)
+        if user is None and payload.get("email"):
+            user = await user_repo.get_by_email(payload["email"])
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -65,6 +67,7 @@ async def get_current_user(
         "id": user_id,
         "email": payload.get("email", ""),
         "name": payload.get("name", "User"),
+        "full_name": payload.get("full_name") or payload.get("name", "User"),
         "created_at": payload.get("created_at", ""),
     }
 

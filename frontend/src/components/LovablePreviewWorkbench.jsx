@@ -145,15 +145,16 @@ export function LovablePreviewWorkbench({
 
             // Auto-select entry point file
             if (filesList.length > 0 && !selectedFile) {
-              const entryFile = filesList.find(f =>
+              const onlyFiles = filesList.filter(f => !f.is_dir)
+              const entryFile = onlyFiles.find(f =>
                 f.path === 'index.html' ||
                 f.path.endsWith('/index.html') ||
                 f.path === 'App.jsx' ||
                 f.path.endsWith('/App.jsx') ||
                 f.path === 'main.py' ||
                 f.path === 'app.py'
-              ) || filesList[0]
-              setSelectedFile(entryFile)
+              ) || onlyFiles[0]
+              if (entryFile) setSelectedFile(entryFile)
             }
           }
         }
@@ -192,7 +193,7 @@ export function LovablePreviewWorkbench({
 
   // Fetch file content whenever selectedFile changes
   useEffect(() => {
-    if (!selectedFile) return
+    if (!selectedFile || selectedFile.is_dir) return
     let isMounted = true
     setFileContentLoading(true)
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { LovablePreviewWorkbench } from './components/LovablePreviewWorkbench.jsx'
 
-const apiBase = 'http://127.0.0.1:8000/api'
+const apiBase = '/api'
 const developmentAgents = ['Planning Agent', 'Coding Agent', 'Build Agent', 'Testing Agent']
 const operationsAgents = ['Security Agent', 'Release Agent', 'Deploy Agent', 'Monitor Agent']
 const allAgents = [...developmentAgents, ...operationsAgents]
@@ -13,11 +13,42 @@ function AuthScreen({ onAuthenticated }) {
   const [mode, setMode] = useState('signin')
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
   const [loading, setLoading] = useState(false)
   const update = (key) => (event) => setForm({ ...form, [key]: event.target.value })
 
-  const handleDemoAccess = () => {
-    const demoUser = { id: 'demo-lead-1', name: 'Alex Morgan', email: 'alex.morgan@swarm.dev', role: 'DevOps Lead' }
+  const switchMode = (newMode) => {
+    setMode(newMode)
+    setError('')
+    setSuccess('')
+  }
+
+  const handleDemoAccess = async () => {
+    setError('')
+    setSuccess('')
+    setLoading(true)
+    try {
+      const response = await fetch(`${apiBase}/auth/demo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setSuccess('Demo access granted! Loading mission control...')
+        localStorage.setItem('swarm-token', data.access_token)
+        localStorage.setItem('swarm-user', JSON.stringify(data.user))
+        setTimeout(() => {
+          onAuthenticated(data.user, data.access_token)
+        }, 200)
+        return
+      }
+    } catch {
+      // safe fallback if offline
+    } finally {
+      setLoading(false)
+    }
+
+    const demoUser = { id: 'demo-lead-1', name: 'Alex Morgan', full_name: 'Alex Morgan', email: 'alex.morgan@swarm.dev', role: 'DevOps Lead' }
     const demoToken = 'mock-demo-jwt-swarm-token'
     localStorage.setItem('swarm-token', demoToken)
     localStorage.setItem('swarm-user', JSON.stringify(demoUser))
@@ -27,19 +58,42 @@ function AuthScreen({ onAuthenticated }) {
   async function submit(event) {
     event.preventDefault()
     setError('')
-    if (mode === 'signup' && form.password !== form.confirmPassword) {
-      return setError('Passwords do not match.')
+    setSuccess('')
+
+    const cleanEmail = form.email.trim().toLowerCase()
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      return setError('Please enter a valid email address (e.g. user@example.com).')
     }
-    if (form.password.length < 6) {
-      return setError('Password must be at least 6 characters long.')
+
+    if (mode === 'signup') {
+      const cleanName = form.name.trim()
+      if (cleanName.length < 2) {
+        return setError('Full name must be at least 2 characters long.')
+      }
+      if (!form.password || form.password.length < 6) {
+        return setError('Password must be at least 6 characters long.')
+      }
+      if (form.password !== form.confirmPassword) {
+        return setError('Passwords do not match.')
+      }
+    } else {
+      if (!form.password) {
+        return setError('Please enter your password.')
+      }
     }
 
     setLoading(true)
     try {
       const endpoint = mode === 'signup' ? `${apiBase}/auth/register` : `${apiBase}/auth/login`
       const payload = mode === 'signup'
-        ? { name: form.name.trim(), email: form.email.trim(), password: form.password }
-        : { email: form.email.trim(), password: form.password }
+        ? {
+            name: form.name.trim(),
+            full_name: form.name.trim(),
+            email: cleanEmail,
+            password: form.password,
+            confirm_password: form.confirmPassword,
+          }
+        : { email: cleanEmail, password: form.password }
 
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -49,12 +103,15 @@ function AuthScreen({ onAuthenticated }) {
 
       const data = await response.json()
       if (!response.ok) {
-        throw new Error(data.detail || 'Authentication failed. Please check credentials.')
+        throw new Error(data.detail || (mode === 'signup' ? 'Registration failed. Email may already be in use.' : 'Invalid email or password.'))
       }
 
+      setSuccess(mode === 'signup' ? 'Account created successfully! Entering mission control…' : 'Signed in successfully! Entering mission control…')
       localStorage.setItem('swarm-token', data.access_token)
       localStorage.setItem('swarm-user', JSON.stringify(data.user))
-      onAuthenticated(data.user, data.access_token)
+      setTimeout(() => {
+        onAuthenticated(data.user, data.access_token)
+      }, 250)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -79,8 +136,8 @@ function AuthScreen({ onAuthenticated }) {
     </section>
     <section className="auth-card">
       <div className="auth-tabs">
-        <button className={mode === 'signin' ? 'active' : ''} onClick={() => { setMode('signin'); setError('') }}>Sign in</button>
-        <button className={mode === 'signup' ? 'active' : ''} onClick={() => { setMode('signup'); setError('') }}>Create account</button>
+        <button className={mode === 'signin' ? 'active' : ''} onClick={() => switchMode('signin')}>Sign in</button>
+        <button className={mode === 'signup' ? 'active' : ''} onClick={() => switchMode('signup')}>Create account</button>
       </div>
       <div className="auth-heading">
         <p className="section-label">{mode === 'signin' ? 'WELCOME BACK' : 'SECURE REGISTRATION'}</p>
@@ -89,27 +146,35 @@ function AuthScreen({ onAuthenticated }) {
       <form className="auth-form" onSubmit={submit}>
         {mode === 'signup' && (
           <label>Full name
-            <input value={form.name} onChange={update('name')} placeholder="Alex Morgan" required />
+            <input value={form.name} onChange={update('name')} placeholder="Alex Morgan" disabled={loading} required />
           </label>
         )}
         <label>Email
-          <input type="email" value={form.email} onChange={update('email')} placeholder="you@example.com" required />
+          <input type="email" value={form.email} onChange={update('email')} placeholder="you@example.com" disabled={loading} required />
         </label>
         <label>Password
-          <input type="password" value={form.password} onChange={update('password')} placeholder="••••••••" required />
+          <input type="password" value={form.password} onChange={update('password')} placeholder="••••••••" disabled={loading} required />
         </label>
         {mode === 'signup' && (
           <label>Confirm password
-            <input type="password" value={form.confirmPassword} onChange={update('confirmPassword')} placeholder="••••••••" required />
+            <input type="password" value={form.confirmPassword} onChange={update('confirmPassword')} placeholder="••••••••" disabled={loading} required />
           </label>
         )}
-        {error && <p className="error">{error}</p>}
+        {error && <p className="error" style={{ margin: '8px 0 12px 0' }}>{error}</p>}
+        {success && <p className="success-banner" style={{ background: '#052e16', border: '1px solid #16a34a', color: '#4ade80', padding: '10px 14px', borderRadius: 6, fontSize: 13, margin: '8px 0 12px 0' }}>{success}</p>}
         <button className="primary-button" type="submit" disabled={loading}>
-          {loading ? 'Authenticating…' : mode === 'signin' ? 'Enter mission control →' : 'Create protected account →'}
+          {loading ? (mode === 'signin' ? 'Signing in…' : 'Creating account…') : (mode === 'signin' ? 'Enter mission control →' : 'Create protected account →')}
         </button>
       </form>
+      <div style={{ marginTop: 14, textAlign: 'center', fontSize: 13, color: '#94a3b8' }}>
+        {mode === 'signin' ? (
+          <span>Don't have an account? <button type="button" style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline', padding: 0, font: 'inherit' }} onClick={() => switchMode('signup')}>Create account</button></span>
+        ) : (
+          <span>Already have an account? <button type="button" style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', textDecoration: 'underline', padding: 0, font: 'inherit' }} onClick={() => switchMode('signin')}>Sign in here</button></span>
+        )}
+      </div>
       <div className="auth-demo-action">
-        <button type="button" className="auth-demo-btn" onClick={handleDemoAccess}>
+        <button type="button" className="auth-demo-btn" disabled={loading} onClick={handleDemoAccess}>
           <span>⚡ Instant Demo Access (Explore Full Swarm UI)</span>
         </button>
       </div>
@@ -324,6 +389,30 @@ function App() {
     }
   }, [user, token])
 
+  // Restore and validate session on initial mount without logging user out on transient network error
+  useEffect(() => {
+    if (token) {
+      fetch(`${apiBase}/auth/me`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            const freshUser = await res.json()
+            setUser(freshUser)
+            localStorage.setItem('swarm-user', JSON.stringify(freshUser))
+          } else if (res.status === 401) {
+            localStorage.removeItem('swarm-token')
+            localStorage.removeItem('swarm-user')
+            setUser(null)
+            setToken(null)
+          }
+        })
+        .catch(() => {
+          // If server is starting up or briefly offline, keep cached session so user is not logged out!
+        })
+    }
+  }, [])
+
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
@@ -502,7 +591,15 @@ function App() {
             <strong>{userDisplayName}</strong>
             <small>{user.email || 'Protected Operator'}</small>
           </div>
-          <button title="Sign out" className="signout" onClick={() => {
+          <button title="Sign out" className="signout" onClick={async () => {
+            if (token) {
+              try {
+                await fetch(`${apiBase}/auth/logout`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}` }
+                })
+              } catch {}
+            }
             localStorage.removeItem('swarm-token')
             localStorage.removeItem('swarm-user')
             setUser(null)

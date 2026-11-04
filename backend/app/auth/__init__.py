@@ -4,6 +4,7 @@ from .dependencies import get_current_user, get_optional_user
 from .repository import (
     InMemoryUserRepository,
     MongoUserRepository,
+    SqliteUserRepository,
     UserRepository,
     create_user_repository,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "UserRepository",
     "InMemoryUserRepository",
     "MongoUserRepository",
+    "SqliteUserRepository",
     "create_user_repository",
     "UserRegisterRequest",
     "UserSignupRequest",
