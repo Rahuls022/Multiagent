@@ -2,7 +2,7 @@
 
 /* Light theme */
 :root[data-theme='light'] .auth-intro>p,:root[data-theme='light'] .auth-heading p:last-child,:root[data-theme='light'] .auth-note,:root[data-theme='light'] .brand small,:root[data-theme='light'] .user-menu small,:root[data-theme='light'] .sidebar nav button,:root[data-theme='light'] .sidebar-footer,:root[data-theme='light'] .metrics span,:root[data-theme='light'] .agent-list small,:root[data-theme='light'] .observer-stats,:root[data-theme='light'] .agent-cards p,:root[data-theme='light'] .toggle-row small,:root[data-theme='light'] th{color:#64748b}
-:root[data-theme='light'] .auth-card,:root[data-theme='light'] .panel,:root[data-theme='light'] .command-card,:root[data-theme='light'] .metrics>div,:root[data-theme='light'] .agent-cards article{background:#fff;border-color:#dbe3ef;box-shadow:0 16px 38px rgba(15,23,42,.08)}
+/* Preserve dark cockpit panel and metric outlines */
 :root[data-theme='light'] .sidebar,:root[data-theme='light'] .auth-tabs,:root[data-theme='light'] input,:root[data-theme='light'] select,:root[data-theme='light'] .logs{background:#f8fafc;border-color:#cbd5e1;color:#172033}
 :root[data-theme='light'] .auth-tabs .active,:root[data-theme='light'] .sidebar nav .selected{background:#5b35a7;color:#fff}
 :root[data-theme='light'] .auth-tabs button,:root[data-theme='light'] .signout{color:#64748b}
@@ -6148,4 +6148,123 @@ h1, h2, h3, h4, h5, h6 {
     width: 100% !important;
     margin-left: 0 !important;
   }
+}
+
+
+/* ==========================================================================
+   CANONICAL DARK COCKPIT OUTLINES (Matches Image 1)
+   ========================================================================== */
+.panel, .command-card, .auth-card {
+  background: #141a27 !important;
+  border: 1px solid #273148 !important;
+  border-radius: 18px !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18) !important;
+}
+
+.metrics > div, .agent-cards article {
+  background: #141a27 !important;
+  border: 1px solid #273148 !important;
+  border-radius: 13px !important;
+  padding: 16px !important;
+}
+
+.metrics span {
+  color: #8e9ab0 !important;
+  font-size: 0.76rem !important;
+}
+
+.metrics strong {
+  color: #f8fafc !important;
+  font-size: 1rem !important;
+}
+
+.metrics strong.completed, .completed {
+  color: #86efac !important;
+}
+
+.sidebar {
+  background: #0c111c !important;
+  border-right: 1px solid #273148 !important;
+}
+
+.sidebar nav button {
+  background: transparent !important;
+  color: #9ba4b5 !important;
+}
+
+.sidebar nav .selected {
+  background: #292044 !important;
+  color: #fff !important;
+}
+
+.section-label, .eyebrow {
+  color: #a78bfa !important;
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.13em !important;
+}
+
+.panel-heading h2 {
+  color: #f8fafc !important;
+  font-size: 1.25rem !important;
+}
+
+.actions button {
+  background: #273148 !important;
+  color: #e9eef8 !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  padding: 11px 14px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+}
+
+.badge {
+  background: #211b3a !important;
+  color: #c4b5fd !important;
+  border-radius: 999px !important;
+  padding: 7px 11px !important;
+  font-size: 0.78rem !important;
+  font-weight: 700 !important;
+}
+
+.agent-list li {
+  border-top: 1px solid #263046 !important;
+}
+
+.agent-list strong {
+  color: #f8fafc !important;
+}
+
+.agent-list small {
+  color: #8e9ab0 !important;
+  font-size: 0.78rem !important;
+}
+
+.status-pill {
+  background: #252f43 !important;
+  color: #aeb8c9 !important;
+  border-radius: 999px !important;
+  padding: 5px 9px !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+}
+
+.status-pill.completed {
+  background: #153c2c !important;
+  color: #86efac !important;
+}
+
+.status-pill.healed {
+  background: #1e3a8a !important;
+  color: #93c5fd !important;
+}
+
+.observer-stats {
+  color: #9ba4b5 !important;
+  font-size: 0.8rem !important;
+}
+
+.observer-stats b {
+  color: #c4b5fd !important;
 }

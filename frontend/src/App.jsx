@@ -199,39 +199,18 @@ function App() {
     }
   })
   const [token, setToken] = useState(() => localStorage.getItem('swarm-token'))
-const [themeMode, setThemeMode] = useState(() => {
-    try {
-      const saved = localStorage.getItem('swarm-theme')
-      if (saved === 'light' || saved === 'dark' || saved === 'system') return saved
-    } catch {}
-    return 'dark'
-  })
+const [themeMode, setThemeMode] = useState('dark')
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const userMenuRef = useRef(null)
 
-  // Apply theme to document and body
+  // Apply dark theme matching exhibition design
   useEffect(() => {
-    const applyTheme = () => {
-      let resolved = themeMode
-      if (themeMode === 'system') {
-        resolved = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      }
-      document.documentElement.setAttribute('data-theme', resolved)
-      document.body.setAttribute('data-theme', resolved)
-    }
-
-    applyTheme()
+    document.documentElement.setAttribute('data-theme', 'dark')
+    document.body.setAttribute('data-theme', 'dark')
     try {
-      localStorage.setItem('swarm-theme', themeMode)
+      localStorage.setItem('swarm-theme', 'dark')
     } catch {}
-
-    if (themeMode === 'system' && window.matchMedia) {
-      const media = window.matchMedia('(prefers-color-scheme: dark)')
-      const listener = () => applyTheme()
-      media.addEventListener('change', listener)
-      return () => media.removeEventListener('change', listener)
-    }
   }, [themeMode])
 
   // Close profile dropdown on outside click or Escape
@@ -496,8 +475,11 @@ const handleSaveSettings = async (newSettings) => {
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme
-    localStorage.setItem('swarm-settings', JSON.stringify(settings))
+    document.documentElement.setAttribute('data-theme', 'dark')
+    document.body.setAttribute('data-theme', 'dark')
+    try {
+      localStorage.setItem('swarm-settings', JSON.stringify(settings))
+    } catch {}
   }, [settings])
 
   useEffect(() => {
@@ -964,14 +946,6 @@ const handleSaveSettings = async (newSettings) => {
             <div className="panel-heading">
               <div><p className="section-label">COLLABORATIVE DEV TEAM</p><h2>Development pipeline</h2></div>
               <div className="actions">
-                <button
-                  type="button"
-                  onClick={() => setPage('preview')}
-                  title="Open live generated website preview"
-                  style={{ background: '#1e3a8a', color: '#93c5fd', borderColor: '#3b82f6' }}
-                >
-                  🌐 Preview Website
-                </button>
                 <button onClick={() => openInspector(selectedAgent)}>Inspect</button>
                 <button onClick={editMission}>Edit</button>
                 <span className="badge">{pipeline?.progress ?? 0}%</span>

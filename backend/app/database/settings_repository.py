@@ -12,7 +12,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 DEFAULT_SYSTEM_SETTINGS: dict[str, Any] = {
-    "theme": "swarm",
+    "theme": "dark",
     "general": {
         "projectName": "Autonomous DevOps Swarm",
         "description": "Multi-Agent Autonomous DevOps & Continuous Healing Engine",
