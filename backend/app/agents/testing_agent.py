@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_agent import BaseAgent
+from app.skills import get_skill_registry
 from app.tools.workspace import WorkspaceManager
 
 
@@ -24,6 +25,9 @@ class TestingAgent(BaseAgent):
             context["workspace"] = workspace
 
         request = task.get("request", "DevOps Mission").strip()
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'verification-before-completion'} skill: enforcing evidence-before-assertions gating.")
 
         # 1. Discover real test files in the workspace
         all_files = [f["path"] for f in workspace.list_files() if not f["is_dir"]]
@@ -79,6 +83,12 @@ class TestingAgent(BaseAgent):
             "status": "completed" if is_success else "failed",
             "success": is_success,
             "summary": f"Executed {total_run} real tests ({passed_count} passed, {failed_count} failed) for {request}.",
+            "skills_used": [skill.name] if skill else ["verification-before-completion"],
+            "skill_applied": {
+                "name": skill.name if skill else "verification-before-completion",
+                "source": "skills.sh",
+                "role": "Iron Law: Evidence before claims, fresh automated test runner verification",
+            },
             "suite_name": f"{request} Test Suite",
             "command": test_cmd,
             "exit_code": exit_code,

@@ -69,3 +69,7 @@ class BaseAgent(ABC):
         if detail:
             message = f"{message}: {detail}"
         return {"timestamp": datetime.now(UTC).isoformat(), "message": message}
+
+    def log(self, message: str, detail: str | None = None) -> dict[str, str]:
+        """Record an observable event or skill execution message."""
+        return self._log(message, detail)

@@ -10,6 +10,7 @@ from typing import Any
 
 from app.workspace import WorkspaceManager as ProjectWorkspaceManager, WorkspaceSecurityError, get_workspace_manager
 from .base_agent import BaseAgent
+from app.skills import get_skill_registry
 from .domain_generators import (
     generate_commerce_backend,
     generate_commerce_html,
@@ -62,6 +63,11 @@ class CodingAgent(BaseAgent):
         plan = planning_stage.get("output", {})
         request = task.get("request", "").strip()
 
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        skill_injection = skill_reg.get_prompt_injection(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'frontend-design'} skill to ground UI in domain requirements and generate distinctive application code.")
+
         planned_files = plan.get("files_to_create", [])
         if not planned_files:
             planned_files = [{"path": "main.py", "language": "python", "purpose": "Application entrypoint"}]
@@ -78,6 +84,7 @@ class CodingAgent(BaseAgent):
             "- summary: concise string description of the implemented code\n"
             "- user_visible_result: concise string summary of the capability built\n"
             "- handoff: string note for the Build and Testing agents.\n\n"
+            f"{skill_injection}\n"
             "IMPORTANT RULES FOR VALID CODE & JSON:\n"
             "1. When generating frontend files ('index.html', 'styles.css', 'app.js'), provide rich, complete, interactive code featuring responsive navigation, metric dashboards, registration forms with validation, live search filters, data tables, and client-side state.\n"
             "2. DOMAIN SPECIALIZATION: Strictly align UI and backend models with the mission domain. If building E-Commerce: product catalog, shopping cart, checkout form, order history, retail metrics. NEVER output student, GPA, or academic fields for an e-commerce or healthcare mission.\n"
@@ -250,6 +257,12 @@ class CodingAgent(BaseAgent):
             "files_written": files_written,
             "workspace_path": str(workspace.root_path),
             "handoff": llm_response.get("handoff", "Files written to workspace; ready for AST and build validation."),
+            "skills_used": [skill.name] if skill else ["frontend-design"],
+            "skill_applied": {
+                "name": skill.name if skill else "frontend-design",
+                "source": "skills.sh",
+                "role": "Domain-grounded visual UI and interactive features",
+            },
         }
 
     def _fallback_files(self, planned_files: list[dict[str, Any]], request: str) -> list[dict[str, Any]]:
@@ -1052,6 +1065,7 @@ class CodingAgent(BaseAgent):
             ],
             "files": files,
             "user_visible_result": f"A full-stack application spanning backend APIs, database schemas, and frontend UI.",
+            "skills_used": ["frontend-design"],
         }
     def validate(self, output: dict[str, Any]) -> tuple[bool, str]:
         if not output:

@@ -425,9 +425,10 @@ function App() {
     setPage('dashboard')
   }
 
+  const activePipeline = pipeline || (history && history.length > 0 ? history[0] : null)
   const stageFor = (agent) => {
     if (!implementedAgents.has(agent)) return { agent, status: 'pending' }
-    return pipeline?.stages.find((stage) => stage.agent === agent) ?? { agent, status: 'waiting' }
+    return (pipeline || activePipeline)?.stages?.find((stage) => stage.agent === agent) ?? { agent, status: 'waiting' }
   }
 
   const logs = useMemo(() => { 
@@ -439,6 +440,7 @@ function App() {
   const observer = pipeline?.observer
   const nav = [
     ['dashboard', 'Dashboard'], 
+    ['preview', 'Website Preview'],
     ['healing', 'Self-Healing'],
     ['agents', 'Agents'], 
     ['logs', 'Logs'], 
@@ -478,7 +480,7 @@ function App() {
       <nav>
         {nav.map(([key, label]) => (
           <button key={key} className={page === key ? 'selected' : ''} onClick={() => setPage(key)}>
-            {key === 'healing' ? '⚡ ' : ''}{label}
+            {key === 'healing' ? '⚡ ' : key === 'preview' ? '🌐 ' : ''}{label}
           </button>
         ))}
       </nav>
@@ -490,8 +492,8 @@ function App() {
         <div className="topbar-brand-row">
           <div className="brand-icon-box">✦</div>
           <div>
-            <p className="eyebrow" style={{ margin: 0 }}>{page.toUpperCase()}</p>
-            <h1>{page === 'dashboard' ? 'Autonomous Mission Control' : page === 'healing' ? 'Self-Healing & DB Failure Memory' : page[0].toUpperCase() + page.slice(1)}</h1>
+            <p className="eyebrow" style={{ margin: 0 }}>{page === 'preview' ? 'WEBSITE VIEWER & WORKBENCH' : page.toUpperCase()}</p>
+            <h1>{page === 'dashboard' ? 'Autonomous Mission Control' : page === 'preview' ? 'Live Generated Website Preview & Workbench' : page === 'healing' ? 'Self-Healing & DB Failure Memory' : page[0].toUpperCase() + page.slice(1)}</h1>
           </div>
         </div>
         <div className="user-menu">
@@ -634,6 +636,27 @@ function App() {
                 <span>STATUS</span>
                 <span className={`status-pill ${pipeline.status}`}>{pipeline.status}</span>
               </div>
+              <button
+                type="button"
+                className="btn-small"
+                style={{
+                  marginLeft: 'auto',
+                  background: '#1d4ed8',
+                  color: '#ffffff',
+                  border: '1px solid #3b82f6',
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                onClick={() => setPage('preview')}
+                title="View generated website in live interactive viewer"
+              >
+                🌐 Open Live Website Preview →
+              </button>
             </div>
           )}
 
@@ -653,6 +676,14 @@ function App() {
             <div className="panel-heading">
               <div><p className="section-label">COLLABORATIVE DEV TEAM</p><h2>Development pipeline</h2></div>
               <div className="actions">
+                <button
+                  type="button"
+                  onClick={() => setPage('preview')}
+                  title="Open live generated website preview"
+                  style={{ background: '#1e3a8a', color: '#93c5fd', borderColor: '#3b82f6' }}
+                >
+                  🌐 Preview Website
+                </button>
                 <button onClick={() => openInspector(selectedAgent)}>Inspect</button>
                 <button onClick={editMission}>Edit</button>
                 <span className="badge">{pipeline?.progress ?? 0}%</span>
@@ -684,10 +715,58 @@ function App() {
         </section>
       </>}
 
+      {page === 'preview' && (
+        <section className="preview-page-container" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: '12px 18px' }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: '#f1f5f9' }}>
+                🌐 Live Generated Application Preview & Multi-Agent Workbench
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+                Mission: <strong>{activePipeline?.task?.request || activePipeline?.request || request || 'Autonomous Dev Swarm Mission'}</strong> · Status: <span className={`status-pill ${activePipeline?.status || 'completed'}`}>{activePipeline?.status || 'Ready'}</span>
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="secondary-button" onClick={() => setPage('dashboard')}>← Back to Mission Control</button>
+              <button className="primary-button" onClick={() => openInspector('Build Agent')}>Inspect Build Agent</button>
+            </div>
+          </div>
+
+          <LovablePreviewWorkbench
+            pipeline={activePipeline}
+            request={activePipeline?.task?.request || activePipeline?.request || request || 'Generated Application'}
+            agent="Build Agent"
+            stage={stageFor('Build Agent')}
+            allAgents={allAgents}
+            stageFor={stageFor}
+            onSelectAgent={(agentName) => {
+              setSelectedAgent(agentName)
+              setInspectorOpen(true)
+            }}
+          />
+        </section>
+      )}
+
       {page === 'healing' && <SelfHealingScreen failures={failures} storage={storage} onRefresh={loadFailures} onSimulate={triggerSimulatedFailure} simulating={healingSimulating} />}
       {page === 'agents' && <section className="panel"><p className="section-label">AGENT DIRECTORY</p><h2>Specialists in this swarm</h2><div className="agent-cards">{allAgents.map((agent, index) => <article key={agent}><span>{String(index + 1).padStart(2, '0')}</span><h3>{agent}</h3><p>{stageFor(agent).status === 'waiting' ? 'Ready for mission' : stageFor(agent).status}</p><button onClick={() => openInspector(agent)}>Inspect agent</button></article>)}</div></section>}
       {page === 'logs' && <section className="panel"><div className="panel-heading"><div><p className="section-label">EXECUTION LOGS</p><h2>Swarm activity</h2></div><div className="actions"><select value={logLevel} onChange={(event) => setLogLevel(event.target.value)}><option value="all">All logs</option><option value="started">Started</option><option value="completed">Completed</option><option value="failed">Failed</option></select><button onClick={() => setClearedLogs(true)}>Clear logs</button></div></div><div className="logs">{logs.length ? logs.map((log, i) => <p key={`${log.timestamp}-${i}`}><span>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '—'}</span>{log.message}</p>) : <p>No logs to display.</p>}</div></section>}
-      {page === 'database' && <DatabaseScreen history={history} failures={failures} dbStatus={dbStatus} storage={storage} onRefresh={() => { loadHistory().catch(() => setError('Could not refresh history.')); loadFailures(); loadDbStatus(); }} />}
+      {page === 'database' && (
+        <DatabaseScreen
+          history={history}
+          failures={failures}
+          dbStatus={dbStatus}
+          storage={storage}
+          onSelectPipelineForPreview={(item) => {
+            setPipeline(item)
+            setPage('preview')
+          }}
+          onRefresh={() => {
+            loadHistory().catch(() => setError('Could not refresh history.'))
+            loadFailures()
+            loadDbStatus()
+          }}
+        />
+      )}
       {page === 'settings' && (
         <SettingsConsole
           settings={settings}
@@ -703,7 +782,18 @@ function App() {
         />
       )}
 
-      {page === 'dashboard' && <WorkflowSidebar pipeline={pipeline} request={request} onInspect={openInspector} minimized={workflowMinimized} expanded={workflowExpanded} onMinimize={() => setWorkflowMinimized(!workflowMinimized)} onExpand={() => { setWorkflowMinimized(false); setWorkflowExpanded(!workflowExpanded) }} />}
+      {page === 'dashboard' && (
+        <WorkflowSidebar
+          pipeline={pipeline}
+          request={request}
+          onInspect={openInspector}
+          onOpenPreview={() => setPage('preview')}
+          minimized={workflowMinimized}
+          expanded={workflowExpanded}
+          onMinimize={() => setWorkflowMinimized(!workflowMinimized)}
+          onExpand={() => { setWorkflowMinimized(false); setWorkflowExpanded(!workflowExpanded) }}
+        />
+      )}
       {inspectorOpen && (
         <InspectModal
           agent={selectedAgent}
@@ -2676,7 +2766,7 @@ function SettingsConsole({ settings, onSaveSettings, onResetDefaults, onNavigate
   )
 }
 
-function WorkflowSidebar({ pipeline, request, onInspect, minimized, expanded, onMinimize, onExpand }) {
+function WorkflowSidebar({ pipeline, request, onInspect, onOpenPreview, minimized, expanded, onMinimize, onExpand }) {
   const planning = pipeline?.stages.find((stage) => stage.agent === 'Planning Agent')
   const coding = pipeline?.stages.find((stage) => stage.agent === 'Coding Agent')
   const build = pipeline?.stages.find((stage) => stage.agent === 'Build Agent')
@@ -2703,6 +2793,34 @@ function WorkflowSidebar({ pipeline, request, onInspect, minimized, expanded, on
         <span className={`status-pill ${pipeline?.status ?? 'waiting'}`}>{pipeline?.status ?? 'ready'}</span>
       </div>
       <p className="workflow-request">{pipeline ? `Mission: ${pipeline.task.request}` : `Ready to plan: ${request}`}</p>
+      
+      {pipeline && (
+        <button
+          type="button"
+          className="preview-shortcut-btn"
+          style={{
+            width: '100%',
+            marginBottom: '14px',
+            padding: '9px 12px',
+            fontSize: '0.82rem',
+            fontWeight: 600,
+            background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+            border: '1px solid #3b82f6',
+            color: '#ffffff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            cursor: 'pointer',
+            borderRadius: '6px',
+            boxShadow: '0 2px 8px rgba(37, 99, 235, 0.3)'
+          }}
+          onClick={onOpenPreview}
+          title="Open generated website in live viewport viewer"
+        >
+          🌐 View Generated Website →
+        </button>
+      )}
       
       {/* 1. Planning Agent */}
       <WorkflowStage 
@@ -4681,7 +4799,7 @@ function MonitorViewer({ monitor }) {
   )
 }
 
-function DatabaseScreen({ history, failures, dbStatus, storage, onRefresh }) {
+function DatabaseScreen({ history, failures, dbStatus, storage, onRefresh, onSelectPipelineForPreview }) {
   const [dbTab, setDbTab] = useState('history')
   const [selectedDoc, setSelectedDoc] = useState(null)
   const isMongo = dbStatus?.storage_type === 'mongodb' || dbStatus?.status === 'connected'
@@ -4778,9 +4896,19 @@ function DatabaseScreen({ history, failures, dbStatus, storage, onRefresh }) {
                     <td>{item.total_execution_duration ? `${item.total_execution_duration}ms` : '—'}</td>
                     <td><small>{new Date(item.updated_at).toLocaleTimeString()}</small></td>
                     <td>
-                      <button className="btn-small" onClick={() => setSelectedDoc({ title: `Pipeline Execution #${item.task.id}`, data: item })}>
-                        Inspect Doc
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button className="btn-small" onClick={() => setSelectedDoc({ title: `Pipeline Execution #${item.task.id}`, data: item })}>
+                          Inspect Doc
+                        </button>
+                        <button
+                          className="btn-small"
+                          style={{ background: '#1e3a8a', borderColor: '#3b82f6', color: '#93c5fd' }}
+                          onClick={() => onSelectPipelineForPreview?.(item)}
+                          title="View generated website in live preview workbench"
+                        >
+                          🌐 Preview
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )) : (

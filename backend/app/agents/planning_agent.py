@@ -8,6 +8,7 @@ from typing import Any
 
 from .base_agent import BaseAgent
 from app.llm import LLMClient
+from app.skills import get_skill_registry
 from app.tools.workspace import WorkspaceManager
 
 
@@ -21,6 +22,11 @@ class PlanningAgent(BaseAgent):
         request = task.get("request", "").strip()
         if not request:
             raise ValueError("Mission request cannot be empty.")
+
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        skill_injection = skill_reg.get_prompt_injection(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'writing-plans'} skill to create the implementation plan.")
 
         system_prompt = (
             "You are an expert Principal Solutions Architect & Lead DevOps Engineer. "
@@ -42,7 +48,8 @@ class PlanningAgent(BaseAgent):
             "CRITICAL ARCHITECTURAL CONSTRAINTS:\n"
             "1. Target Stack: When the user requests a website, portal, dashboard, UI, or web application, you MUST plan BOTH frontend files ('index.html', 'styles.css', 'app.js') AND backend/test files ('app.py', 'tests/test_app.py'). For backend-only services, plan Python modules ('app.py', 'models.py', 'tests/test_app.py').\n"
             "2. File Count: Plan 3 to 5 essential, high-impact files so the Coding Agent can generate complete, runnable code without timing out.\n"
-            "3. Dependencies: Use HTML5, modern vanilla JavaScript/CSS, and Python Standard Library or pre-installed FastAPI."
+            "3. Dependencies: Use HTML5, modern vanilla JavaScript/CSS, and Python Standard Library or pre-installed FastAPI.\n"
+            f"{skill_injection}"
         )
 
         user_prompt = f"Mission Objective: {request}"
@@ -78,6 +85,12 @@ class PlanningAgent(BaseAgent):
         plan.setdefault("api_contract", [])
         plan.setdefault("implementation_steps", [])
         plan.setdefault("acceptance_criteria", [])
+        plan["skills_used"] = [skill.name] if skill else ["writing-plans"]
+        plan["skill_applied"] = {
+            "name": skill.name if skill else "writing-plans",
+            "source": "skills.sh",
+            "role": "Structured implementation planning and acceptance criteria",
+        }
 
         # Maintain UI compatibility metadata if not present
         if "project" not in plan:

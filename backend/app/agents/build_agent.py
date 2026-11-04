@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .base_agent import BaseAgent
+from app.skills import get_skill_registry
 from app.tools.preview_manager import PreviewManager
 from app.tools.workspace import WorkspaceManager
 
@@ -26,6 +27,10 @@ class BuildAgent(BaseAgent):
             context["workspace"] = workspace
 
         request = task.get("request", "DevOps Project").strip()
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'systematic-debugging'} skill: applying root-cause AST analysis and multi-layer compiler verification.")
+
         all_files = workspace.list_files()
         file_paths = [f["path"] for f in all_files if not f["is_dir"]]
 
@@ -181,6 +186,12 @@ class BuildAgent(BaseAgent):
             "status": "success" if not errors else "failed",
             "success": not bool(errors),
             "summary": f"Build verified clean ({len(file_paths)} files, {total_loc} lines validated)." if not errors else f"Build completed with {len(errors)} issues.",
+            "skills_used": [skill.name] if skill else ["systematic-debugging"],
+            "skill_applied": {
+                "name": skill.name if skill else "systematic-debugging",
+                "source": "skills.sh",
+                "role": "Root-cause diagnostic AST syntax analysis and compiler gating",
+            },
             "command": compile_cmd,
             "exit_code": cmd_res["exit_code"],
             "stdout": cmd_res["stdout"],

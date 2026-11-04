@@ -124,6 +124,19 @@ async def get_database_status(request: Request):
     return await repo.get_status()
 
 
+@app.get("/api/skills")
+def get_skills():
+    """Return installed skills from skills.sh and their dedicated agent mappings."""
+    from app.skills import get_skill_registry
+    reg = get_skill_registry()
+    return {
+        "status": "active",
+        "skills": reg.list_available_skills(),
+        "mappings": reg.list_agent_skills(),
+        "source": "https://www.skills.sh/",
+    }
+
+
 # =====================================================================
 # Authentication & User Safety Routes
 # =====================================================================
