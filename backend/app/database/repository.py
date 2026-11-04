@@ -18,6 +18,10 @@ except ImportError:
     AsyncIOMotorClient = None  # type: ignore[assignment,misc]
 
 
+class DuplicateUserError(ValueError):
+    """Raised when attempting to create a user with an email that already exists."""
+
+
 class PipelineRepository(Protocol):
     storage_name: str
 
@@ -736,4 +740,181 @@ def create_pipeline_repository() -> PipelineRepository:
                 pass
 
     return SQLitePipelineRepository(sqlite_path)
+
+
+class UserRepository(Protocol):
+    storage_name: str
+
+    async def create_user(self, user_data: dict[str, Any]) -> dict[str, Any]: ...
+    async def get_by_email(self, email: str) -> dict[str, Any] | None: ...
+    async def get_by_id(self, user_id: str) -> dict[str, Any] | None: ...
+    async def close(self) -> None: ...
+
+
+class InMemoryUserRepository:
+    """Safe development fallback storing user records in memory."""
+
+    storage_name = "in-memory (users)"
+
+    def __init__(self) -> None:
+        self._users_by_id: dict[str, dict[str, Any]] = {}
+        self._users_by_email: dict[str, dict[str, Any]] = {}
+
+    async def create_user(self, user_data: dict[str, Any]) -> dict[str, Any]:
+        email_key = user_data["email"].lower().strip()
+        if email_key in self._users_by_email:
+            raise DuplicateUserError(f"User with email '{user_data['email']}' already exists.")
+        user = deepcopy(user_data)
+        user.setdefault("created_at", datetime.now(UTC).isoformat())
+        self._users_by_id[user["id"]] = user
+        self._users_by_email[email_key] = user
+        return deepcopy(user)
+
+    async def get_by_email(self, email: str) -> dict[str, Any] | None:
+        user = self._users_by_email.get(email.lower().strip())
+        return deepcopy(user) if user else None
+
+    async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
+        user = self._users_by_id.get(user_id)
+        return deepcopy(user) if user else None
+
+    async def list_users(self) -> list[dict[str, Any]]:
+        return list(self._users_by_id.values())
+
+    async def close(self) -> None:
+        return None
+
+
+class SqliteUserRepository:
+    """SQLite implementation for local user storage."""
+
+    storage_name = "sqlite (users)"
+
+    def __init__(self, db_path: str = "devops_swarm.db") -> None:
+        self.db_path = str(db_path)
+        self._init_db()
+
+    def _init_db(self) -> None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    email TEXT UNIQUE NOT NULL,
+                    full_name TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            conn.commit()
+
+    async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
+        return await asyncio.to_thread(self._create_user_sync, user)
+
+    def _create_user_sync(self, user: dict[str, Any]) -> dict[str, Any]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "INSERT INTO users (id, email, full_name, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        user["id"],
+                        user["email"].strip().lower(),
+                        user["full_name"].strip(),
+                        user["password_hash"],
+                        user.get("created_at", datetime.now(UTC).isoformat()),
+                        user.get("updated_at", datetime.now(UTC).isoformat()),
+                    ),
+                )
+                conn.commit()
+                return deepcopy(user)
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
+
+    async def get_by_email(self, email: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_by_email_sync, email)
+
+    def _get_by_email_sync(self, email: str) -> dict[str, Any] | None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE email = ? COLLATE NOCASE", (email.strip().lower(),))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self._get_by_id_sync, user_id)
+
+    def _get_by_id_sync(self, user_id: str) -> dict[str, Any] | None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    async def list_users(self) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._list_users_sync)
+
+    def _list_users_sync(self) -> list[dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    async def close(self) -> None:
+        return None
+
+
+class MongoUserRepository:
+    """MongoDB implementation for permanent user persistence when MongoDB is running."""
+
+    storage_name = "mongodb (users)"
+
+    def __init__(self, url: str, database_name: str) -> None:
+        if AsyncIOMotorClient is None:
+            raise RuntimeError("MongoDB support requires the 'motor' package.")
+        self.client = AsyncIOMotorClient(url)
+        self.db = self.client[database_name]
+        self.users_coll = self.db["users"]
+
+    async def init_indexes(self) -> None:
+        try:
+            await self.users_coll.create_index("email", unique=True)
+        except Exception:
+            pass
+
+    async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
+        doc = deepcopy(user)
+        doc["email"] = doc["email"].strip().lower()
+        try:
+            await self.users_coll.insert_one(doc)
+        except Exception as exc:
+            raise DuplicateUserError(f"User with email '{user['email']}' already exists.") from exc
+        doc.pop("_id", None)
+        return doc
+
+    async def get_by_email(self, email: str) -> dict[str, Any] | None:
+        return await self.users_coll.find_one({"email": email.strip().lower()}, {"_id": 0})
+
+    async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
+        return await self.users_coll.find_one({"id": user_id}, {"_id": 0})
+
+    async def list_users(self) -> list[dict[str, Any]]:
+        cursor = self.users_coll.find({}, {"_id": 0}).sort("created_at", -1)
+        return await cursor.to_list(length=100)
+
+    async def close(self) -> None:
+        self.client.close()
+
+
+def create_user_repository() -> UserRepository:
+    mongo_url = os.getenv("MONGODB_URL")
+    if mongo_url and _is_mongo_reachable(mongo_url):
+        return MongoUserRepository(mongo_url, os.getenv("MONGODB_DATABASE", "devops_swarm"))
+    default_db_path = str(Path(__file__).resolve().parent.parent.parent / "devops_swarm.db")
+    db_path = os.getenv("SQLITE_DATABASE_PATH", default_db_path)
+    return SqliteUserRepository(db_path)
 

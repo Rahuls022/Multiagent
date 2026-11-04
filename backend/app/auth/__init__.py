@@ -11,6 +11,7 @@ from .schemas import (
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
+    UserSignupRequest,
     UserResponse,
 )
 from .security import (
@@ -28,6 +29,7 @@ __all__ = [
     "MongoUserRepository",
     "create_user_repository",
     "UserRegisterRequest",
+    "UserSignupRequest",
     "UserLoginRequest",
     "UserResponse",
     "TokenResponse",

@@ -1,11 +1,13 @@
-"""HTTP request models for the dashboard API."""
+"""HTTP request and response models for the dashboard and authentication API."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from pydantic import BaseModel, Field, field_validator
 
-from pydantic import BaseModel, Field
 
+EMAIL_REGEX = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
 
 
 class PipelineRequest(BaseModel):
@@ -20,6 +22,7 @@ class PipelineRequest(BaseModel):
     build_and_deployment_preferences: dict[str, Any] | str | None = Field(default=None, description="Build containerization or cloud rollout preferences")
     require_approval: bool | None = Field(default=False, description="Require manual operator approval before production release")
     user_id: str | None = Field(default=None, description="Optional authenticated user ID")
+    project_id: str | None = Field(default=None, description="Optional target project workspace ID")
 
     def to_mission_task(self, fallback_user_id: str | None = None) -> dict[str, Any]:
         """Convert input payload to structured mission task context."""
@@ -64,7 +67,90 @@ class PipelineRequest(BaseModel):
             "build_and_deployment_preferences": build_prefs,
             "require_approval": bool(self.require_approval or (self.deployment_target == "production")),
             "user_id": self.user_id or fallback_user_id or "anonymous",
+            "project_id": self.project_id,
             "created_at": now_iso,
             "status": "pending",
         }
 
+
+class WorkspaceFileUpdateRequest(BaseModel):
+    project_id: str = Field(..., description="Project workspace identifier")
+    path: str = Field(..., description="Relative path of the file to write or update")
+    content: str = Field(..., description="Source code or text content to write")
+
+
+class WorkspaceGenerateRequest(BaseModel):
+    request: str = Field(min_length=3, max_length=500, description="Mission specification")
+    project_id: str | None = Field(default=None, description="Optional target project workspace ID")
+
+
+class UserSignupRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=100, description="Full name of the user")
+    email: str = Field(..., description="Valid email address")
+    password: str = Field(..., min_length=8, max_length=128, description="Password (minimum 8 characters)")
+    confirm_password: str = Field(..., description="Password confirmation")
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        clean = v.strip()
+        if len(clean) < 2:
+            raise ValueError("Full name must be at least 2 characters long")
+        return clean
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if not re.match(EMAIL_REGEX, clean):
+            raise ValueError("Please provide a valid email address (e.g. user@example.com)")
+        domain = clean.split("@")[-1]
+        if domain.startswith("gmail.") and domain != "gmail.com":
+            raise ValueError("Only valid Gmail addresses ending with @gmail.com are allowed")
+        return clean
+
+    @field_validator("confirm_password")
+    @classmethod
+    def validate_passwords_match(cls, v: str, info) -> str:
+        password = info.data.get("password")
+        if password is not None and v != password:
+            raise ValueError("Passwords do not match")
+        return v
+
+
+class UserLoginRequest(BaseModel):
+    email: str = Field(..., description="User email address")
+    password: str = Field(..., description="User password")
+    remember_me: bool = Field(default=False, description="Whether to remember session across browser restarts")
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if not re.match(EMAIL_REGEX, clean):
+            raise ValueError("Please provide a valid email address")
+        domain = clean.split("@")[-1]
+        if domain.startswith("gmail.") and domain != "gmail.com":
+            raise ValueError("Only valid Gmail addresses ending with @gmail.com are allowed")
+        return clean
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str | None = None
+    name: str | None = None
+    created_at: str
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.full_name and self.name:
+            self.full_name = self.name
+        if not self.name and self.full_name:
+            self.name = self.full_name
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+    expires_in: int = 1440
