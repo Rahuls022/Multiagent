@@ -6,12 +6,17 @@ from typing import Any
 
 from ..base_agent import BaseAgent
 from app.tools.workspace import WorkspaceManager
+from app.skills import get_skill_registry
 
 
 class ReleaseAgent(BaseAgent):
     name = "Release Agent"
 
     async def execute(self, task: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'release-management'} skill to verify quality gates, assemble release manifests, and package artifacts.")
+
         # 1. Verify required prerequisites: Build, Test, Security
         dev_context = context.get("development", {})
         dev_stages = dev_context.get("stages", []) if isinstance(dev_context, dict) else []
@@ -68,5 +73,11 @@ class ReleaseAgent(BaseAgent):
             "release_notes": release_notes,
             "created_at": datetime.now(UTC).isoformat(),
             "message": f"Release {version} ({release_tag}) prepared and signed. Handing off to Deploy Agent.",
+            "skills_used": [skill.name] if skill else ["release-management"],
+            "skill_applied": {
+                "name": skill.name if skill else "release-management",
+                "source": "skills.sh",
+                "role": "Semantic release versioning, cryptographic checksum verification, and approval gate management",
+            },
         }
 

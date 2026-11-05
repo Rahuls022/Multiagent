@@ -87,23 +87,8 @@ class PreviewManager:
             raise RuntimeError("No available preview port found in range 9101-9999.")
 
     def detect_frontend(self, workspace_dir: Path) -> dict[str, Any]:
-        """Detect frontend framework, entry point, and directory to serve. Guarantees index.html presence to eliminate directory listings."""
+        """Detect frontend framework, entry point, and directory to serve strictly within this mission's workspace."""
         ws = Path(workspace_dir).resolve()
-
-        # 0. Check if this is a parent directory (contains sub-workspaces with index.html)
-        if not (ws / "index.html").is_file() and not (ws / "frontend" / "index.html").is_file():
-            nested_htmls = sorted(
-                [h for h in ws.glob("*/index.html") if "node_modules" not in h.parts] +
-                [h for h in ws.glob("*/*/index.html") if "node_modules" not in h.parts],
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
-            if nested_htmls:
-                # Target the actual application sub-workspace
-                target_sub = nested_htmls[0].parent
-                if target_sub.name == "frontend":
-                    target_sub = target_sub.parent
-                ws = target_sub
 
         # 1. Check for package.json
         pkg_paths = [ws / "package.json", ws / "frontend" / "package.json"]
@@ -237,8 +222,10 @@ class PreviewManager:
         with self._lock:
             existing = self._servers.get(mission_id)
             if existing and existing.is_alive():
-                # Verify existing server has index.html; if not, kill stale server
-                if (existing.workspace_dir / "index.html").exists() or (existing.workspace_dir / "frontend" / "index.html").exists():
+                # Verify existing server matches this exact workspace directory and has index.html
+                if existing.workspace_dir.resolve() == ws_path.resolve() and (
+                    (existing.workspace_dir / "index.html").exists() or (existing.workspace_dir / "frontend" / "index.html").exists()
+                ):
                     return {
                         "status": "running",
                         "ready": True,

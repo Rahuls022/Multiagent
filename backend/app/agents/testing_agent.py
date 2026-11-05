@@ -83,11 +83,11 @@ class TestingAgent(BaseAgent):
             "status": "completed" if is_success else "failed",
             "success": is_success,
             "summary": f"Executed {total_run} real tests ({passed_count} passed, {failed_count} failed) for {request}.",
-            "skills_used": [skill.name] if skill else ["verification-before-completion"],
+            "skills_used": [skill.name, "verification-before-completion"] if skill else ["verification-before-completion", "webapp-testing"],
             "skill_applied": {
                 "name": skill.name if skill else "verification-before-completion",
                 "source": "skills.sh",
-                "role": "Iron Law: Evidence before claims, fresh automated test runner verification",
+                "role": "Web application functionality verification and strict zero-defect assertions",
             },
             "suite_name": f"{request} Test Suite",
             "command": test_cmd,

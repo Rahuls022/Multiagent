@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 from app.workspace import WorkspaceManager as ProjectWorkspaceManager, WorkspaceSecurityError, get_workspace_manager
 from .base_agent import BaseAgent
 from app.skills import get_skill_registry
+from app.agents.testing_platform_generator import get_testing_platform_files
 from .domain_generators import (
     generate_commerce_backend,
     generate_commerce_html,
@@ -34,6 +36,9 @@ from .domain_generators import (
     generate_student_js,
     generate_student_tests,
     get_student_portal_files,
+    get_commerce_platform_files,
+    get_hospital_platform_files,
+    get_generic_platform_files,
 )
 from .project_context import project_context
 from app.llm import LLMClient
@@ -112,21 +117,26 @@ class CodingAgent(BaseAgent):
             "Generate the full source code for every planned file now."
         )
 
+        is_offline = os.getenv("LLM_OFFLINE", "0").lower() in ("1", "true", "yes")
         llm_response = {}
-        try:
-            llm_response = await self.client.create_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.2,
-                max_tokens=2500,
-            )
-            files_data = llm_response.get("files", [])
-        except Exception as exc:
-            import logging
-            logging.getLogger("autonomous_devops.coding").warning(
-                "Coding Agent LLM call encountered error (%s). Synthesizing resilient fallback files.", exc
-            )
+        files_data = []
+        if is_offline:
             files_data = self._fallback_files(planned_files, request)
+        else:
+            try:
+                llm_response = await self.client.create_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.2,
+                    max_tokens=2500,
+                )
+                files_data = llm_response.get("files", [])
+            except Exception as exc:
+                import logging
+                logging.getLogger("autonomous_devops.coding").warning(
+                    "Coding Agent LLM call encountered error (%s). Synthesizing resilient fallback files.", exc
+                )
+                files_data = self._fallback_files(planned_files, request)
 
         req_lower = request.lower()
         is_web = bool(re.search(
@@ -148,24 +158,26 @@ class CodingAgent(BaseAgent):
         # Domain Integrity & Generation Enforcement
         ctx = project_context(request)
         domain = ctx.get("domain", "generic")
+        domain_files: list[dict[str, Any]] = []
         if domain == "student":
-            # For student management missions, synthesize the complete verified multi-tier portal structure
-            student_portal_files = get_student_portal_files(ctx.get("name", "Student Management Portal"), ctx)
-            existing_paths = {f.get("path") for f in files_data}
-            for sf in student_portal_files:
-                if sf["path"] not in existing_paths:
-                    files_data.append(sf)
+            domain_files = get_student_portal_files(ctx.get("name", "Student Management Portal"), ctx)
+        elif domain == "testing":
+            domain_files = get_testing_platform_files(ctx.get("name", "TestFlow – Unit & Integration Testing Management Platform"), ctx)
+        elif domain in ("ecommerce", "juice"):
+            domain_files = get_commerce_platform_files(ctx.get("name", "E-Commerce Store"), ctx)
+        elif domain == "hospital":
+            domain_files = get_hospital_platform_files(ctx.get("name", "Hospital Clinic Portal"), ctx)
         else:
-            for idx, f in enumerate(files_data):
-                rel_p = f.get("path", "")
-                if rel_p.endswith((".html", ".js")):
-                    code_lower = f.get("code", "").lower()
-                    student_leak = any(bad in code_lower for bad in ["cumulative gpa", "defaultstudents", "student code", "active academic departments", "dean miller", "academic cohort"])
-                    tech_leak = domain != "ecommerce" and any(bad in code_lower for bad in ["aura pro wireless headphones", "pulsefit ultra smartwatch", "vortex mechanical gaming keyboard", "ergocomfort desk chair"])
-                    if student_leak or tech_leak:
-                        fallback_map = {rf["path"]: rf for rf in self._fallback_files([], request)}
-                        if rel_p in fallback_map:
-                            files_data[idx] = fallback_map[rel_p]
+            domain_files = get_generic_platform_files(ctx.get("name", "Business Portal"), ctx)
+
+        existing_paths = {f.get("path") for f in files_data}
+        for df in domain_files:
+            if df["path"] not in existing_paths:
+                files_data.append(df)
+            else:
+                for idx, ef in enumerate(files_data):
+                    if ef.get("path") == df["path"]:
+                        files_data[idx] = df
 
         files_written = []
         files_to_create_ui = []
@@ -237,7 +249,7 @@ class CodingAgent(BaseAgent):
                 raise RuntimeError(f"CODING_VERIFICATION_FAILED: Physical file {rel} is empty (0 bytes).")
             verified_paths.append(rel)
 
-        # Domain-specific verification for Student Portal
+        # Domain-specific verification for Student Portal & Testing Platform
         if domain == "student":
             has_html = any(p in verified_paths for p in ["frontend/index.html", "index.html"])
             has_backend = any(p in verified_paths for p in ["backend/main.py", "app.py"])
@@ -245,6 +257,15 @@ class CodingAgent(BaseAgent):
             if not (has_html and has_backend and has_tests):
                 raise RuntimeError(
                     f"CODING_VERIFICATION_FAILED: Missing essential student portal files on disk "
+                    f"(has_html={has_html}, has_backend={has_backend}, has_tests={has_tests})"
+                )
+        elif domain == "testing":
+            has_html = any(p in verified_paths for p in ["frontend/index.html", "index.html"])
+            has_backend = any(p in verified_paths for p in ["backend/main.py", "app.py"])
+            has_tests = any(p in verified_paths for p in ["tests/test_api.py", "tests/test_suites.py", "tests/test_app.py"])
+            if not (has_html and has_backend and has_tests):
+                raise RuntimeError(
+                    f"CODING_VERIFICATION_FAILED: Missing essential TestFlow files on disk "
                     f"(has_html={has_html}, has_backend={has_backend}, has_tests={has_tests})"
                 )
 
@@ -274,6 +295,12 @@ class CodingAgent(BaseAgent):
 
         if domain == "student":
             return get_student_portal_files(name, ctx)
+        if domain == "testing":
+            return get_testing_platform_files(name, ctx)
+        if domain in ("ecommerce", "juice"):
+            return get_commerce_platform_files(name, ctx)
+        if domain == "hospital":
+            return get_hospital_platform_files(name, ctx)
 
         req_lower = request.lower()
         is_web = bool(re.search(
@@ -523,6 +550,34 @@ class CodingAgent(BaseAgent):
         is_modification = any(k in words for k in ["modify", "update", "patch", "change", "edit"]) and bool(existing_files)
         if is_modification:
             return self._handle_file_modification(request, user_id, project_id, existing_files)
+
+        # Testing Platform Domain (ONLY if domain is testing)
+        if project.get("domain") == "testing":
+            tf_files = get_testing_platform_files(name, project)
+            return {
+                "summary": f"Complete TestFlow QA Platform Architecture for {name}",
+                "implementation_order": [
+                    {"step": 1, "area": "Platform Layout", "detail": "Constructed 5-view UI and interactive modals."},
+                    {"step": 2, "area": "FastAPI QA Engine", "detail": "Configured REST endpoints and SQLite database persistence."},
+                    {"step": 3, "area": "Automated Unit Tests", "detail": "Implemented quality gate assertions and test suites."},
+                ],
+                "files": tf_files,
+                "user_visible_result": "A high-assurance unit & integration testing management platform with executive dashboard, execution console, and analytics.",
+            }
+
+        # E-Commerce & Retail / Juice Domain
+        if project.get("domain") in ("ecommerce", "juice"):
+            comm_files = get_commerce_platform_files(name, project)
+            return {
+                "summary": f"Complete Commercial Platform Architecture for {name}",
+                "implementation_order": [
+                    {"step": 1, "area": "Storefront UI", "detail": "Constructed responsive catalog, shopping cart, and checkout modals."},
+                    {"step": 2, "area": "Order Management Engine", "detail": "Configured REST endpoints and SQLite database persistence."},
+                    {"step": 3, "area": "Automated Quality Tests", "detail": "Implemented order validation and inventory tests."},
+                ],
+                "files": comm_files,
+                "user_visible_result": f"A high-assurance commercial platform for {name} with live catalog, shopping cart, checkout, and inventory tracking.",
+            }
 
         # Detect tech stacks
         has_react_kw = bool(words & {"react", "frontend", "ui", "spa", "website", "ecommerce", "store"}) or "e-commerce" in req_lower or "web app" in req_lower

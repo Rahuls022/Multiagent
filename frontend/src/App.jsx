@@ -1002,6 +1002,26 @@ const handleSaveSettings = async (newSettings) => {
             <div className="panel-heading">
               <div><p className="section-label">COLLABORATIVE DEV TEAM</p><h2>Development pipeline</h2></div>
               <div className="actions">
+                <button
+                  type="button"
+                  className="preview-website-btn"
+                  onClick={() => setPage('preview')}
+                  title="View live generated application"
+                  style={{
+                    background: '#1d4ed8',
+                    color: '#ffffff',
+                    border: '1px solid #3b82f6',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  🌐 Preview Website
+                </button>
                 <button onClick={() => openInspector(selectedAgent)}>Inspect</button>
                 <button onClick={editMission}>Edit</button>
                 <span className="badge">{pipeline?.progress ?? 0}%</span>

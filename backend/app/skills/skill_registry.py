@@ -46,6 +46,10 @@ class SkillRegistry:
         "Coding Agent": "frontend-design",
         "Build Agent": "systematic-debugging",
         "Testing Agent": "verification-before-completion",
+        "Security Agent": "security-audit",
+        "Release Agent": "release-management",
+        "Deploy Agent": "deployment-automation",
+        "Monitor Agent": "observability",
     }
 
     def __init__(self, skills_dir: Path | str | None = None) -> None:
@@ -185,15 +189,59 @@ class SkillRegistry:
                 "3. Gather multi-layer boundary evidence across syntax check, imports, and compilation.\n"
                 "---------------------------------------------------\n"
             )
-        elif name == "verification-before-completion":
+        elif name == "verification-before-completion" or name == "webapp-testing":
             return (
-                "\n--- [APPLIED AGENT SKILL: verification-before-completion] ---\n"
+                "\n--- [APPLIED AGENT SKILL: webapp-testing & verification-before-completion] ---\n"
                 f"{desc_line}"
-                "You are operating with the 'verification-before-completion' skill from skills.sh:\n"
+                "You are operating with web application testing and evidence verification skills from skills.sh:\n"
                 "1. The Iron Law: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.\n"
-                "2. Identify verification command (e.g. python -m unittest discover -v).\n"
-                "3. Run full command, read exit code and test output; count passed and failed assertions.\n"
-                "4. Zero fake claims: Only report 'completed' when evidence confirms 100% test passing.\n"
+                "2. Verify all interactive UI modules: Working catalog, responsive navigation, functional forms, and search filters.\n"
+                "3. Run full verification command (e.g. python -m unittest discover -v); count passed/failed assertions.\n"
+                "4. Validate local and API state persistence across workflow interactions.\n"
+                "---------------------------------------------------\n"
+            )
+        elif name == "security-audit":
+            return (
+                "\n--- [APPLIED AGENT SKILL: security-audit] ---\n"
+                f"{desc_line}"
+                "You are operating with the 'security-audit' skill from skills.sh:\n"
+                "1. Zero-Trust Audit: Inspect all generated source code for exposed API keys, passwords, and tokens.\n"
+                "2. Input Validation: Check for unescaped user input execution or path traversal vulnerability.\n"
+                "3. Dependency Verification: Check that only safe, standard library dependencies are imported.\n"
+                "4. Stop the pipeline immediately if any secret leaks or high-risk vulnerabilities are detected.\n"
+                "---------------------------------------------------\n"
+            )
+        elif name == "release-management":
+            return (
+                "\n--- [APPLIED AGENT SKILL: release-management] ---\n"
+                f"{desc_line}"
+                "You are operating with the 'release-management' skill from skills.sh:\n"
+                "1. Release Gate Attestation: Confirm Build, Testing, and Security gates have all passed cleanly.\n"
+                "2. Semantic Tagging: Generate deterministic release versions (v1.0.x) and SHA-256 checksums.\n"
+                "3. Package Artifacts: Assemble release manifests with comprehensive release notes.\n"
+                "4. Approval Gate: Enforce human operator sign-off for production environment rollouts.\n"
+                "---------------------------------------------------\n"
+            )
+        elif name == "deployment-automation":
+            return (
+                "\n--- [APPLIED AGENT SKILL: deployment-automation] ---\n"
+                f"{desc_line}"
+                "You are operating with the 'deployment-automation' skill from skills.sh:\n"
+                "1. Isolated Workspace Binding: Deploy ONLY the current mission's workspace directory.\n"
+                "2. Port Allocation: Dynamically allocate an open, non-conflicting TCP port (9101-9999).\n"
+                "3. Local Server Process: Spawn sandboxed HTTP server serving index.html and assets.\n"
+                "4. Live Endpoint Probing: Verify HTTP 200 OK reachability before reporting status.\n"
+                "---------------------------------------------------\n"
+            )
+        elif name == "observability":
+            return (
+                "\n--- [APPLIED AGENT SKILL: observability] ---\n"
+                f"{desc_line}"
+                "You are operating with the 'observability' skill from skills.sh:\n"
+                "1. Runtime Health Probing: Verify live service availability with real HTTP GET probes.\n"
+                "2. Latency Benchmarking: Record millisecond response times and evaluate SLA thresholds.\n"
+                "3. Telemetry Signal: Capture CPU, memory, uptime, and active service indicators.\n"
+                "4. Automated Remediation Bridge: Trigger self-healing workflows if incidents or timeouts occur.\n"
                 "---------------------------------------------------\n"
             )
 

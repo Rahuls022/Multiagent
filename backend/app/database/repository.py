@@ -531,8 +531,21 @@ class MongoPipelineRepository:
         self.failures_coll = self.db["failure_memory"]
         self.previews_coll = self.db["mission_previews"]
 
+    def _ensure_client(self) -> None:
+        try:
+            client_loop = getattr(self.client, "io_loop", None) or getattr(self.client, "_io_loop", None)
+            if client_loop and getattr(client_loop, "is_closed", lambda: False)():
+                self.client = AsyncIOMotorClient(self.url, serverSelectionTimeoutMS=2500)
+                self.db = self.client[self.database_name]
+                self.pipelines_coll = self.db["pipeline_history"]
+                self.failures_coll = self.db["failure_memory"]
+                self.previews_coll = self.db["mission_previews"]
+        except Exception:
+            pass
+
     async def init(self) -> None:
         """Create indexes according to the autonomous DevOps swarm schema."""
+        self._ensure_client()
         try:
             await self.pipelines_coll.create_index("task.id", unique=True)
             await self.pipelines_coll.create_index("pipeline_id")
@@ -639,25 +652,30 @@ class MongoPipelineRepository:
         return doc
 
     async def create(self, pipeline: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_client()
         doc = self._normalize_pipeline_doc(pipeline)
         await self.pipelines_coll.replace_one({"task.id": doc["task"]["id"]}, deepcopy(doc), upsert=True)
         return pipeline
 
     async def update(self, pipeline_id: str, pipeline: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_client()
         doc = self._normalize_pipeline_doc(pipeline)
         await self.pipelines_coll.replace_one({"task.id": pipeline_id}, deepcopy(doc), upsert=True)
         return pipeline
 
     async def get(self, pipeline_id: str) -> dict[str, Any] | None:
+        self._ensure_client()
         doc = await self.pipelines_coll.find_one({"$or": [{"task.id": pipeline_id}, {"pipeline_id": pipeline_id}]}, {"_id": 0})
         return doc
 
     async def list(self, limit: int = 20, user_id: str | None = None) -> list[dict[str, Any]]:
+        self._ensure_client()
         query = {"task.user_id": user_id} if user_id else {}
         cursor = self.pipelines_coll.find(query, {"_id": 0}).sort("updated_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
     async def save_failure_memory(self, record: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_client()
         item = deepcopy(record)
         now_iso = datetime.now(UTC).isoformat()
         item.setdefault("created_at", now_iso)
@@ -684,15 +702,18 @@ class MongoPipelineRepository:
         return item
 
     async def list_failure_memory(self, limit: int = 50) -> list[dict[str, Any]]:
+        self._ensure_client()
         cursor = self.failures_coll.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
     async def list_failures(self, limit: int = 50, user_id: str | None = None) -> list[dict[str, Any]]:
+        self._ensure_client()
         query = {"user_id": user_id} if user_id else {}
         cursor = self.failures_coll.find(query, {"_id": 0}).sort("created_at", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
     async def find_matching_healing_pattern(self, error_signature: str) -> dict[str, Any] | None:
+        self._ensure_client()
         escaped_sig = re.escape(error_signature)
         return await self.failures_coll.find_one(
             {"error_signature": {"$regex": escaped_sig, "$options": "i"}, "success": True},
@@ -700,6 +721,7 @@ class MongoPipelineRepository:
         )
 
     async def save_preview_metadata(self, record: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_client()
         item = deepcopy(record)
         now_iso = datetime.now(UTC).isoformat()
         item.setdefault("updated_at", now_iso)
@@ -709,6 +731,7 @@ class MongoPipelineRepository:
         return item
 
     async def get_preview_metadata(self, mission_id: str) -> dict[str, Any] | None:
+        self._ensure_client()
         return await self.previews_coll.find_one({"mission_id": mission_id}, {"_id": 0})
 
     async def close(self) -> None:
@@ -947,13 +970,25 @@ class MongoUserRepository:
         self.db = self.client[database_name]
         self.users_coll = self.db["users"]
 
+    def _ensure_client(self) -> None:
+        try:
+            client_loop = getattr(self.client, "io_loop", None) or getattr(self.client, "_io_loop", None)
+            if client_loop and getattr(client_loop, "is_closed", lambda: False)():
+                self.client = AsyncIOMotorClient(self.url)
+                self.db = self.client[self.database_name]
+                self.users_coll = self.db["users"]
+        except Exception:
+            pass
+
     async def init_indexes(self) -> None:
+        self._ensure_client()
         try:
             await self.users_coll.create_index("email", unique=True)
         except Exception:
             pass
 
     async def create_user(self, user: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_client()
         doc = deepcopy(user)
         doc["email"] = doc["email"].strip().lower()
         full_name = (doc.get("full_name") or doc.get("name") or "").strip()
@@ -974,6 +1009,7 @@ class MongoUserRepository:
         return doc
 
     async def get_by_email(self, email: str) -> dict[str, Any] | None:
+        self._ensure_client()
         doc = await self.users_coll.find_one({"email": email.strip().lower()}, {"_id": 0})
         if doc:
             doc.setdefault("name", doc.get("full_name", ""))
@@ -983,6 +1019,7 @@ class MongoUserRepository:
         return doc
 
     async def get_by_id(self, user_id: str) -> dict[str, Any] | None:
+        self._ensure_client()
         doc = await self.users_coll.find_one({"id": user_id}, {"_id": 0})
         if doc:
             doc.setdefault("name", doc.get("full_name", ""))

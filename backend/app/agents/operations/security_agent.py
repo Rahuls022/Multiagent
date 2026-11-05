@@ -8,12 +8,17 @@ from pathlib import Path
 from ..base_agent import BaseAgent
 from app.tools.workspace import WorkspaceManager
 from app.tools.security_scanner import SecurityScanner
+from app.skills import get_skill_registry
 
 
 class SecurityAgent(BaseAgent):
     name = "Security Agent"
 
     async def execute(self, task: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'security-audit'} skill to perform zero-trust code scanning and secret leak detection.")
+
         workspace: WorkspaceManager | None = context.get("workspace")
         if workspace is None:
             workspace_root = context.get("workspace_root")
@@ -42,6 +47,12 @@ class SecurityAgent(BaseAgent):
             "findings": scan_res["findings"],
             "checks": ["Dependencies", "Secrets", "Basic vulnerabilities", "Dangerous Commands", "Path Traversal"],
             "message": scan_res["message"],
+            "skills_used": [skill.name] if skill else ["security-audit"],
+            "skill_applied": {
+                "name": skill.name if skill else "security-audit",
+                "source": "skills.sh",
+                "role": "Zero-trust source code scanning, secrets detection, and AST vulnerability audit",
+            },
         }
 
         if not scan_res["passed"]:

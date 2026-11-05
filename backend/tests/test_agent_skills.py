@@ -181,7 +181,7 @@ class TestAgentSkills(unittest.TestCase):
         self.assertEqual(data["mappings"]["Coding Agent"], "frontend-design")
         self.assertEqual(data["mappings"]["Build Agent"], "systematic-debugging")
         self.assertEqual(data["mappings"]["Testing Agent"], "verification-before-completion")
-        self.assertEqual(len(data["skills"]), 4)
+        self.assertGreaterEqual(len(data["skills"]), 4)
 
 
 if __name__ == "__main__":

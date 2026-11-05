@@ -428,6 +428,8 @@ class LLMClient:
         max_tokens: int = 4000,
     ) -> dict[str, Any]:
         """Request structured JSON completion from the configured LLM provider."""
+        if os.getenv("LLM_OFFLINE", "0").lower() in ("1", "true", "yes"):
+            raise RuntimeError("LLM_OFFLINE is set; short-circuiting to resilient local synthesis.")
         self.verify_configured()
         sys_directive = (
             f"{system_prompt}\n\nIMPORTANT: You MUST respond with a single, valid JSON object ONLY. "
@@ -461,6 +463,8 @@ class LLMClient:
         max_tokens: int = 4000,
     ) -> str:
         """Request text completion from the configured LLM provider."""
+        if os.getenv("LLM_OFFLINE", "0").lower() in ("1", "true", "yes"):
+            raise RuntimeError("LLM_OFFLINE is set; short-circuiting to resilient local synthesis.")
         self.verify_configured()
         import time
         start_t = time.perf_counter()

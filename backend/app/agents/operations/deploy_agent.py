@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..base_agent import BaseAgent
+from app.skills import get_skill_registry
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,10 @@ class DeployAgent(BaseAgent):
     name = "Deploy Agent"
 
     async def execute(self, task: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'deployment-automation'} skill to allocate isolated preview ports, start local servers, and verify live endpoints.")
+
         # 1. Verify release condition
         release_stage = context.get("Release Agent", {})
         release = release_stage.get("output", {})
@@ -90,6 +95,12 @@ class DeployAgent(BaseAgent):
             "traffic_allocation": "100%",
             "deployment_strategy": "rolling_update",
             "message": f"Successfully rolled out release {version} to {target_env} environment at {endpoint}.",
+            "skills_used": [skill.name] if skill else ["deployment-automation"],
+            "skill_applied": {
+                "name": skill.name if skill else "deployment-automation",
+                "source": "skills.sh",
+                "role": "Isolated workspace rollout, dynamic port allocation, and live HTTP endpoint probing",
+            },
         }
 
     def validate(self, output: dict[str, Any]) -> tuple[bool, str]:

@@ -13,9 +13,14 @@ from typing import Any, Dict, List
 def extract_business_name(request: str) -> str:
     """Extract a clean, professional business name from natural language request."""
     req = request.strip()
-    # Strip leading action verbs
+    if re.search(r"\bfreshsip\b", req, re.IGNORECASE):
+        return "FreshSip Juice Centre"
+    if re.search(r"\btestflow\b", req, re.IGNORECASE):
+        return "TestFlow"
+
+    # Strip leading action verbs and determiners
     clean = re.sub(
-        r"^(build|create|develop|design|make|setup|generate)\s+(a|an|the)?\s*",
+        r"^(build|create|develop|design|make|setup|generate)\s+(?:(?:a|an|the|professional|modern|full-stack)\s+)*",
         "",
         req,
         flags=re.IGNORECASE,
@@ -30,7 +35,7 @@ def extract_business_name(request: str) -> str:
     if match and match.group(1):
         candidate = match.group(1).strip()
         # Exclude generic words
-        tokens = [w for w in candidate.split() if w.lower() not in ("website", "portal", "web", "app", "application")]
+        tokens = [w for w in candidate.split() if w.lower() not in ("website", "portal", "web", "app", "application", "a", "an", "the", "for", "of")]
         if tokens:
             name = " ".join(t.capitalize() for t in tokens)
             return name
@@ -40,7 +45,7 @@ def extract_business_name(request: str) -> str:
     if m_with and m_with.group(1):
         clean = m_with.group(1).strip()
 
-    clean = " ".join(word.capitalize() for word in clean.split() if word.lower() not in ("website", "web", "portal"))
+    clean = " ".join(word.capitalize() for word in clean.split() if word.lower() not in ("website", "web", "portal", "a", "an", "the", "for", "of"))
     return clean or "Business Portal"
 
 
@@ -491,7 +496,7 @@ def get_generic_commerce_profile(business_name: str, domain_theme: str) -> Dict[
     name = business_name or "Custom Store"
     theme = domain_theme or "Specialty Goods"
     return {
-        "domain": "generic",
+        "domain": "ecommerce",
         "name": name,
         "kind": f"{name} Online Platform",
         "actor": "Customer & Store Manager",
@@ -584,6 +589,84 @@ def project_context(request: str) -> dict[str, Any]:
             ],
             "feature_slug": "students",
             "pascal_entity": "Student",
+        }
+
+    # 1.5. Unit & Integration Testing Platform (TestFlow)
+    if any(k in text for k in ["test", "testing", "unit test", "integration test", "testflow", "qa", "quality assurance", "test automation", "test suite", "test case"]):
+        tf_name = "TestFlow – Unit & Integration Testing Management Platform" if any(w in text for w in ["testflow", "unit", "integration", "platform", "portal"]) else (business_name if "test" in business_name.lower() else f"{business_name} Testing Platform")
+        return {
+            "domain": "testing",
+            "name": tf_name,
+            "kind": "Unit & Integration Testing Management Platform",
+            "actor": "QA Engineer & Test Architect",
+            "entity": "test_suite",
+            "plural": "test_suites",
+            "primary_action": "manage unit test suites, run integration pipelines, monitor real-time test execution, and analyze coverage metrics",
+            "brand_icon": "⚡",
+            "brand_tag": "Enterprise QA Platform",
+            "hero_tag": "⚡ Continuous Quality Automation",
+            "hero_title": "Enterprise Unit & Integration Testing Platform",
+            "hero_desc": "Unified testing workbench featuring real-time test execution monitoring, scenario building, code coverage analytics, and admin controls.",
+            "kpi_labels": {
+                "catalog": "Total Test Suites",
+                "orders": "Test Runs Executed",
+                "revenue": "Overall Pass Rate",
+                "health": "Code Coverage",
+            },
+            "features": [
+                "Executive QA Dashboard & Real-Time KPI Cards",
+                "Interactive Units Directory with CRUD & Search",
+                "Integration Testing Module with Scenario Configuration",
+                "Real-Time Test Execution Console with Progress Streaming",
+                "Interactive Visual Analytics (Coverage, Trends, Pass/Fail Ratio)",
+                "Protected Admin Settings with Auth & Healing Control",
+            ],
+            "domain_models": [
+                {
+                    "name": "TestSuite",
+                    "fields": [
+                        {"name": "id", "type": "String", "description": "Unique test suite identifier"},
+                        {"name": "name", "type": "String", "description": "Test suite name"},
+                        {"name": "type", "type": "Enum", "description": "Unit | Integration | E2E | Security | API"},
+                        {"name": "module", "type": "String", "description": "Application module under test"},
+                        {"name": "cases_count", "type": "Integer", "description": "Total assertions count"},
+                        {"name": "status", "type": "Enum", "description": "Passed | Failed | Running | Pending"},
+                        {"name": "coverage", "type": "Float", "description": "Code coverage percentage"},
+                        {"name": "duration_ms", "type": "Integer", "description": "Execution duration in milliseconds"},
+                        {"name": "framework", "type": "String", "description": "PyTest | Jest | Playwright | Vitest"},
+                    ],
+                },
+                {
+                    "name": "TestRun",
+                    "fields": [
+                        {"name": "id", "type": "String", "description": "Run execution reference"},
+                        {"name": "suite_name", "type": "String", "description": "Executed suite name"},
+                        {"name": "status", "type": "Enum", "description": "Passed | Failed"},
+                        {"name": "duration_ms", "type": "Integer", "description": "Execution latency"},
+                        {"name": "assertions_passed", "type": "Integer", "description": "Passing assertions"},
+                        {"name": "assertions_failed", "type": "Integer", "description": "Failing assertions"},
+                        {"name": "log_output", "type": "String", "description": "Console output logs"},
+                    ],
+                },
+            ],
+            "routes": [
+                {"method": "GET", "path": "/api/test-suites", "description": "List all test suites with status & module filters"},
+                {"method": "POST", "path": "/api/test-suites", "description": "Create a new unit or integration test suite"},
+                {"method": "POST", "path": "/api/test-runs/execute", "description": "Trigger real-time execution of test suites"},
+                {"method": "GET", "path": "/api/analytics/coverage", "description": "Retrieve comprehensive test analytics"},
+                {"method": "POST", "path": "/api/auth/admin-login", "description": "Authenticate QA administrator"},
+                {"method": "GET", "path": "/api/health", "description": "QA engine health check"},
+            ],
+            "ui": [
+                "Executive QA Dashboard",
+                "Units Directory & Search/Filter Grid",
+                "Integration Testing Scenario Builder",
+                "Real-Time Execution Monitor Console",
+                "Visual Analytics Charts",
+                "Admin Control Panel",
+            ],
+            "feature_slug": "testing",
+            "pascal_entity": "TestSuite",
         }
 
     # 2. Hospital / Healthcare Portal
@@ -722,8 +805,133 @@ def project_context(request: str) -> dict[str, Any]:
             ],
         }
 
-    # 8. General Store / E-Commerce fallback
-    if any(k in text for k in ["store", "shop", "e-commerce", "ecommerce", "order", "product", "cart", "checkout", "retail", "marketplace", "merchandise", "shopping", "catalog"]):
+    # 8. Library & Catalog Management
+    if any(k in text for k in ["library", "book", "books", "borrow", "reading", "book catalog", "librarian"]):
+        return {
+            "domain": "library",
+            "name": business_name if "library" in business_name.lower() else f"{business_name} Library",
+            "kind": "Digital Library & Catalog Management System",
+            "actor": "Member & Head Librarian",
+            "entity": "book",
+            "plural": "books",
+            "primary_action": "browse book catalog, issue books, return volumes, and monitor circulation records",
+            "brand_icon": "📚",
+            "brand_tag": "Library Catalog & Circulation",
+            "hero_tag": "📖 Digital Reading Resource",
+            "hero_title": "Explore Our Curated Library Catalog & Knowledge Base",
+            "hero_desc": "Search thousands of volumes, manage borrowing history, issue loans, and track return schedules.",
+            "kpi_labels": {
+                "catalog": "Total Catalog Books",
+                "orders": "Active Book Loans",
+                "revenue": "Reserved Titles",
+                "health": "Available on Shelf",
+            },
+            "features": [
+                "Catalog Search with Author, Genre, and ISBN Filters",
+                "Automated Borrow & Return Circulation Desk",
+                "Overdue Loan Monitoring with Fine Calculations",
+                "Digital Member Card & Loan History Explorer",
+                "Live Shelf Inventory & Collection Health Metrics",
+            ],
+            "feature_slug": "books",
+            "pascal_entity": "Book",
+            "domain_models": [
+                {"name": "Book", "fields": [{"name": "id", "type": "String"}, {"name": "title", "type": "String"}, {"name": "author", "type": "String"}, {"name": "isbn", "type": "String"}, {"name": "status", "type": "Enum"}]},
+                {"name": "Loan", "fields": [{"name": "id", "type": "String"}, {"name": "book_id", "type": "String"}, {"name": "borrower", "type": "String"}, {"name": "due_date", "type": "DateTime"}]},
+            ],
+            "routes": [
+                {"method": "GET", "path": "/api/books", "description": "Search and list catalog books"},
+                {"method": "POST", "path": "/api/loans", "description": "Issue a book loan to a borrower"},
+                {"method": "GET", "path": "/api/loans", "description": "List current active loans"},
+                {"method": "POST", "path": "/api/returns", "description": "Process a book return"},
+                {"method": "GET", "path": "/api/health", "description": "Circulation desk health check"},
+            ],
+        }
+
+    # 9. Employee & HR Portal
+    if any(k in text for k in ["employee", "staff", "human resources", "hr portal", "payroll", "personnel", "workforce"]):
+        return {
+            "domain": "employee",
+            "name": business_name if "hr" in business_name.lower() or "employee" in business_name.lower() else f"{business_name} HR Portal",
+            "kind": "Enterprise HR & Personnel Management System",
+            "actor": "Staff Member & HR Lead",
+            "entity": "employee",
+            "plural": "employees",
+            "primary_action": "manage employee directory, record onboardings, process leaves, and view payroll metrics",
+            "brand_icon": "👥",
+            "brand_tag": "Workforce Directory & HR",
+            "hero_tag": "💼 People Operations Hub",
+            "hero_title": "Modern Team Collaboration & Staff Management",
+            "hero_desc": "Unified directory of team members, departments, compensation tiers, and leave requests.",
+            "kpi_labels": {
+                "catalog": "Active Employees",
+                "orders": "Pending Leave Requests",
+                "revenue": "Monthly Payroll",
+                "health": "Department Coverage",
+            },
+            "features": [
+                "Staff Directory with Department and Role Badges",
+                "Employee Onboarding & Registration Form",
+                "Paid Time Off (PTO) & Leave Approval Workflow",
+                "Performance Review & Appraisal Tracking",
+                "Headcount & Compensation Distribution Analytics",
+            ],
+            "feature_slug": "employees",
+            "pascal_entity": "Employee",
+            "domain_models": [
+                {"name": "Employee", "fields": [{"name": "id", "type": "String"}, {"name": "full_name", "type": "String"}, {"name": "department", "type": "String"}, {"name": "role", "type": "String"}, {"name": "status", "type": "Enum"}]},
+            ],
+            "routes": [
+                {"method": "GET", "path": "/api/employees", "description": "List all active team employees"},
+                {"method": "POST", "path": "/api/employees", "description": "Register a new employee record"},
+                {"method": "GET", "path": "/api/departments", "description": "List department rosters"},
+                {"method": "GET", "path": "/api/health", "description": "HR service health check"},
+            ],
+        }
+
+    # 10. Warehouse & Inventory Management
+    if any(k in text for k in ["inventory", "warehouse", "stock", "supply chain", "logistics", "depot"]):
+        return {
+            "domain": "inventory",
+            "name": business_name if "inventory" in business_name.lower() or "warehouse" in business_name.lower() else f"{business_name} Inventory",
+            "kind": "Real-Time Warehouse & Inventory Operations",
+            "actor": "Warehouse Manager & Logistics Lead",
+            "entity": "item",
+            "plural": "items",
+            "primary_action": "audit warehouse stock, track SKU bin locations, replenish supplies, and manage dispatch",
+            "brand_icon": "📦",
+            "brand_tag": "SKU Inventory Control",
+            "hero_tag": "🏭 Warehouse Supply Chain",
+            "hero_title": "Real-Time Inventory Control & Warehouse Tracking",
+            "hero_desc": "Monitor stock levels across aisles, track inbound shipments, manage restock thresholds, and prevent shortages.",
+            "kpi_labels": {
+                "catalog": "Monitored SKUs",
+                "orders": "Pending Inbound Shipments",
+                "revenue": "Total Inventory Value",
+                "health": "Low Stock Alerts",
+            },
+            "features": [
+                "SKU Catalog with Bin Location & Barcode Tracking",
+                "Inbound Stock Receipt & Quality Inspection",
+                "Automated Low Stock Replenishment Triggers",
+                "Stock Movement & Transfer Audit Logs",
+                "Storage Capacity & Turnover Rate Dashboards",
+            ],
+            "feature_slug": "inventory",
+            "pascal_entity": "InventoryItem",
+            "domain_models": [
+                {"name": "Item", "fields": [{"name": "sku", "type": "String"}, {"name": "name", "type": "String"}, {"name": "quantity", "type": "Integer"}, {"name": "location", "type": "String"}, {"name": "reorder_level", "type": "Integer"}]},
+            ],
+            "routes": [
+                {"method": "GET", "path": "/api/inventory", "description": "List SKU inventory records"},
+                {"method": "POST", "path": "/api/inventory/adjust", "description": "Adjust stock counts"},
+                {"method": "GET", "path": "/api/inventory/alerts", "description": "List low-stock warnings"},
+                {"method": "GET", "path": "/api/health", "description": "Warehouse engine health check"},
+            ],
+        }
+
+    # 11. General Store / E-Commerce fallback
+    if any(k in text for k in ["store", "shop", "e-commerce", "ecommerce", "e commerce", "commerce", "order", "product", "cart", "checkout", "retail", "marketplace", "merchandise", "shopping", "catalog"]):
         g_profile = get_generic_commerce_profile(business_name, "Retail Products")
         return {
             **g_profile,

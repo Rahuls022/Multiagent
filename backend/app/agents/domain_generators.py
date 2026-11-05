@@ -3749,3 +3749,50 @@ python -m http.server 9101
     })
 
     return files
+
+
+from .commerce_generator import get_commerce_platform_files
+
+
+def get_hospital_platform_files(name: str = "Hospital Clinic Portal", ctx: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Synthesizes the complete, verified, interactive Hospital and Healthcare portal structure."""
+    effective_ctx = dict(ctx or {})
+    if "name" not in effective_ctx and name:
+        effective_ctx["name"] = name
+    return [
+        {"path": "index.html", "language": "html", "purpose": "Interactive Clinical Dashboard, Doctor Directory, and Appointment Booking", "code": generate_hospital_html(name, effective_ctx)},
+        {"path": "styles.css", "language": "css", "purpose": "Unified responsive dark-themed healthcare stylesheet", "code": generate_css()},
+        {"path": "app.js", "language": "javascript", "purpose": "Client-side controller for appointments, doctor availability, and patient registrations", "code": generate_hospital_js(name)},
+        {"path": "app.py", "language": "python", "purpose": "Clinical doctor directory, patient record management, and appointment booking REST API", "code": generate_hospital_backend(name)},
+        {"path": "test_app.py", "language": "python", "purpose": "Automated healthcare unit tests verifying doctor listings, appointments, and patient registration", "code": generate_hospital_tests(name)},
+        {"path": "README.md", "language": "markdown", "purpose": "Clinical portal architecture specifications and API documentation", "code": f"# {name}\n\nAutomated Healthcare Operations Platform."},
+    ]
+
+
+def get_generic_platform_files(name: str = "Business Portal", ctx: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Synthesizes the complete, verified, interactive Operations Platform for library, HR, inventory, or custom domains."""
+    effective_ctx = dict(ctx or {})
+    if "name" not in effective_ctx and name:
+        effective_ctx["name"] = name
+    entity = effective_ctx.get("entity", "item")
+    plural = effective_ctx.get("plural", f"{entity}s")
+    return [
+        {"path": "index.html", "language": "html", "purpose": f"Interactive {name} Operations Dashboard, Record Directory, and Submission Modals", "code": generate_generic_html(name, entity, plural, effective_ctx)},
+        {"path": "styles.css", "language": "css", "purpose": "Unified responsive dark-themed operations dashboard stylesheet", "code": generate_css()},
+        {"path": "app.js", "language": "javascript", "purpose": f"Client-side controller for {plural} listing, dynamic metric updates, search filtering, and record creation", "code": generate_generic_js(name, entity, plural, effective_ctx)},
+        {"path": "app.py", "language": "python", "purpose": f"REST API with SQLite persistence for {plural} CRUD, health telemetry, and status transitions", "code": generate_generic_backend(name, entity, plural)},
+        {"path": "test_app.py", "language": "python", "purpose": f"Automated unit test suite verifying {entity} creation, retrieval, listing, and deletion quality gates", "code": generate_generic_tests(name, entity, plural)},
+        {"path": "README.md", "language": "markdown", "purpose": f"{name} technical architecture documentation and operations guide", "code": f"# {name}\n\nAutomated Operations System."},
+    ]
+
+
+# Re-export Testing Platform Generator components
+from app.agents.testing_platform_generator import (
+    generate_testing_html,
+    generate_testing_css,
+    generate_testing_js,
+    generate_testing_backend,
+    generate_testing_tests,
+    get_testing_platform_files,
+)
+

@@ -68,7 +68,7 @@ class PlanningAgent(BaseAgent):
         fallback_supported = is_offline or is_web or (domain != "generic")
 
         plan = {}
-        if fallback_supported and not getattr(self.client, "is_configured", True):
+        if is_offline or (fallback_supported and not getattr(self.client, "is_configured", True)):
             plan = self._fallback_plan(request)
         else:
             if hasattr(self.client, "verify_configured"):
@@ -254,6 +254,95 @@ class PlanningAgent(BaseAgent):
                     {"step": "2", "command_or_spec": "python app.py"},
                 ],
                 "handoff": "Coding Agent: Generate complete frontend portal and FastAPI backend with 9-endpoint test suite.",
+                "project": ctx,
+            }
+
+        if domain == "testing":
+            files_to_create = [
+                {"path": "index.html", "language": "html", "purpose": "TestFlow Platform Dashboard & UI"},
+                {"path": "styles.css", "language": "css", "purpose": "Deep Navy SaaS QA Platform Stylesheet"},
+                {"path": "app.js", "language": "javascript", "purpose": "Client Controller, Runner Engine & LocalStore Sync"},
+                {"path": "frontend/index.html", "language": "html", "purpose": "Frontend Web Entry"},
+                {"path": "frontend/styles.css", "language": "css", "purpose": "Frontend Styles"},
+                {"path": "frontend/app.js", "language": "javascript", "purpose": "Frontend Controller"},
+                {"path": "app.py", "language": "python", "purpose": "FastAPI & SQLite TestFlow Backend"},
+                {"path": "backend/main.py", "language": "python", "purpose": "Backend Entry"},
+                {"path": "tests/test_api.py", "language": "python", "purpose": "Automated Unit Tests"},
+                {"path": "tests/test_suites.py", "language": "python", "purpose": "Automated Suite Assertions"},
+                {"path": "README.md", "language": "markdown", "purpose": "Documentation"},
+            ]
+            return {
+                "request": request,
+                "summary": "Implementation Plan for TestFlow Unit & Integration Testing Management Platform",
+                "goal": "Build and deploy the TestFlow high-assurance testing management platform featuring KPI dashboard, interactive test directory, execution monitor, analytics charts, and admin controls.",
+                "requirements": [
+                    "KPI Dashboard displaying 6 metric cards (Suites, Test Cases, Passed, Failed, Pending, Code Coverage)",
+                    "Units Directory with full CRUD, real-time search, module/status filtering, and single-suite runner",
+                    "Integration Testing module with multi-module scenario builder, environment target, and failure trace inspector",
+                    "Real-time Test Execution Console with streaming logs, animated progress bar, assertions counter, and latency profiler",
+                    "Interactive Visual Analytics (Pass vs Fail ratio, 7-day trend SVG bar chart, module coverage bars)",
+                    "Protected Administration module with admin login (admin@testflow.io / admin123) and self-healing configuration",
+                    "Dual-mode persistence (SQLite database + localStorage synchronization) so all user actions persist across refreshes",
+                    "FastAPI REST API with endpoints: GET/POST/DELETE /api/test-suites, POST /api/test-runs/execute, POST /api/auth/admin-login, GET /api/health",
+                    "Automated unit test suite validating pass rate computation, quality gate threshold, and suite assertions",
+                ],
+                "architecture": {
+                    "frontend": "Modern deep navy SaaS web interface (JetBrains Mono & Plus Jakarta Sans)",
+                    "backend": "FastAPI REST API Service with SQLite persistence",
+                    "database": "SQLite persistent database (test_platform.db)",
+                    "security": "Admin credential verification, sanitized inputs, zero-trust validation",
+                },
+                "domain_models": [
+                    {
+                        "name": "TestSuite",
+                        "fields": [
+                            {"name": "id", "type": "str", "description": "Suite ID (e.g. TS-101)"},
+                            {"name": "name", "type": "str", "description": "Test suite name"},
+                            {"name": "type", "type": "str", "description": "Unit | Integration | E2E | Security | API"},
+                            {"name": "module", "type": "str", "description": "Target module"},
+                            {"name": "cases_count", "type": "int", "description": "Assertion cases count"},
+                            {"name": "status", "type": "str", "description": "Passed | Failed | Running | Pending"},
+                            {"name": "coverage", "type": "float", "description": "Coverage percentage"},
+                            {"name": "duration_ms", "type": "int", "description": "Latency in ms"},
+                            {"name": "framework", "type": "str", "description": "Test framework"},
+                        ],
+                    }
+                ],
+                "api_contract": [
+                    {"method": "GET", "path": "/api/health", "description": "Service health check"},
+                    {"method": "GET", "path": "/api/test-suites", "description": "List all unit & integration test suites"},
+                    {"method": "POST", "path": "/api/test-suites", "description": "Create a new test suite"},
+                    {"method": "DELETE", "path": "/api/test-suites/{suite_id}", "description": "Delete a test suite"},
+                    {"method": "POST", "path": "/api/test-runs/execute", "description": "Trigger real-time execution of test suites"},
+                    {"method": "POST", "path": "/api/auth/admin-login", "description": "Authenticate QA administrator"},
+                ],
+                "files_to_create": files_to_create,
+                "files_to_modify": [],
+                "implementation_steps": [
+                    {"step": 1, "title": "Synthesize TestFlow SaaS UI", "detail": "Construct 5-view navigation, KPI cards, Units Directory, Integration Builder, Execution Console, and Analytics", "deliverables": ["index.html", "styles.css", "app.js", "frontend/index.html"]},
+                    {"step": 2, "title": "Synthesize FastAPI QA Backend", "detail": "Implement REST endpoints, SQLite test_platform.db tables, and runner simulation", "deliverables": ["app.py", "backend/main.py"]},
+                    {"step": 3, "title": "Synthesize Automated Test Suite", "detail": "Implement unit tests for pass rate, quality gate thresholds, and assertions", "deliverables": ["tests/test_api.py", "tests/test_suites.py"]},
+                ],
+                "acceptance_criteria": [
+                    "Live website preview renders full TestFlow platform with zero empty space",
+                    "All 6 KPI cards display accurate dynamic metrics",
+                    "Units Directory supports search, module filter, creating new suite, viewing details, running tests, and deletion",
+                    "Integration Testing module builds scenarios and displays failure trace inspector",
+                    "Execution Monitor streams real-time logs with animated progress bar and latency",
+                    "Admin settings modal accepts admin@testflow.io / admin123 credentials",
+                    "All actions persist in localStorage and sync with backend SQLite",
+                ],
+                "testing_plan": [
+                    {"name": "test_pass_rate_computation", "target": "QualityGate", "assertion": "computes exact pass percentage"},
+                    {"name": "test_quality_gate_threshold", "target": "QualityGate", "assertion": "enforces minimum 85% pass threshold"},
+                    {"name": "test_suite_name_validation", "target": "TestSuite", "assertion": "verifies suite naming conventions"},
+                    {"name": "test_assertion_count", "target": "TestSuite", "assertion": "confirms total assertion volume over 100"},
+                ],
+                "deployment_plan": [
+                    {"step": "1", "command_or_spec": "python -m unittest discover -v tests/"},
+                    {"step": "2", "command_or_spec": "python app.py"},
+                ],
+                "handoff": "Coding Agent: Generate complete TestFlow UI, FastAPI backend, and automated test suite.",
                 "project": ctx,
             }
 

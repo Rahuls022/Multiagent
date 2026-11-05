@@ -4,12 +4,17 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..base_agent import BaseAgent
+from app.skills import get_skill_registry
 
 
 class MonitorAgent(BaseAgent):
     name = "Monitor Agent"
 
     async def execute(self, task: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        skill_reg = get_skill_registry()
+        skill = skill_reg.get_skill_for_agent(self.name)
+        self.log(f"I'm using the {skill.name if skill else 'observability'} skill to probe runtime health, benchmark latency, and monitor service telemetry.")
+
         deploy_stage = context.get("Deploy Agent", {})
         deploy_output = deploy_stage.get("output", {})
         deploy_status = deploy_output.get("status", "deployed")
@@ -66,5 +71,11 @@ class MonitorAgent(BaseAgent):
             "monitoring_state": "active",
             "timestamp": datetime.now(UTC).isoformat(),
             "message": f"Service monitoring reports HTTP {http_code} OK at {endpoint}. Telemetry verified healthy (latency: {response_time_ms}ms, zero incidents).",
+            "skills_used": [skill.name] if skill else ["observability"],
+            "skill_applied": {
+                "name": skill.name if skill else "observability",
+                "source": "skills.sh",
+                "role": "Live HTTP service health checks, latency profiling, and autonomous incident detection",
+            },
         }
 
