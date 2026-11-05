@@ -53,7 +53,7 @@ export function LovablePreviewWorkbench({
   const terminalEndRef = useRef(null)
 
   // Extract pipeline id and key stages
-  const pipelineId = pipeline?.task?.id || pipeline?.pipeline_id || 'default'
+  const pipelineId = pipeline?.task?.id || pipeline?.pipeline_id || pipeline?.id || (typeof pipeline?._id === 'string' ? pipeline._id : pipeline?._id?.$oid) || ''
   const buildStage = stageFor('Build Agent')
   const codingStage = stageFor('Coding Agent')
   const planStage = stageFor('Planning Agent')
@@ -472,7 +472,7 @@ export function LovablePreviewWorkbench({
               <div className="iframe-wrapper">
                 <iframe
                   key={`${pipelineId}_${previewStatus.port || '0'}_${iframeKey}`}
-                  src={`${liveUrl}?mission=${encodeURIComponent(pipelineId)}&v=${iframeKey}`}
+                  src={`${liveUrl}${pipelineId ? `?mission=${encodeURIComponent(pipelineId)}&` : "?"}v=${iframeKey}`}
                   title={`Live Generated Website Application Preview - ${domainBadge.label}`}
                   className="large-preview-iframe"
                   sandbox="allow-scripts allow-forms allow-same-origin allow-modals allow-popups"

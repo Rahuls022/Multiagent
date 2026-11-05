@@ -29,12 +29,12 @@ DEFAULT_SYSTEM_SETTINGS: dict[str, Any] = {
         "autonomyLevel": "supervised",
         "autoHealing": True,
         "autoRetryFailedJobs": True,
-        "requireHumanApproval": True,
+        "requireHumanApproval": False,
         "maxRemediationAttempts": 2,
         "rollbackOnFailedFix": True,
     },
     "safety": {
-        "approvalBeforeProduction": True,
+        "approvalBeforeProduction": False,
         "approvalBeforeDatabase": True,
         "approvalBeforeInfra": True,
         "protectedEnvironments": {

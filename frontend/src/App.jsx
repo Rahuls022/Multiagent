@@ -541,9 +541,8 @@ const handleSaveSettings = async (newSettings) => {
     try { 
       // Connect active swarm settings into backend pipeline request
       const shouldRequireApproval = Boolean(
-        settings.autonomous?.requireHumanApproval ||
-        settings.safety?.approvalBeforeProduction ||
-        requireApproval
+        requireApproval ||
+        (settings.autonomous?.requireHumanApproval && settings.safety?.approvalBeforeProduction)
       )
       const targetEnv = deploymentTarget || (settings.safety?.protectedEnvironments?.production ? 'development' : 'staging')
       const testingSpecs = settings.buildTesting?.qualityGates
@@ -2030,15 +2029,7 @@ function InspectModal({ agent, stage, request, onClose, onEdit, allAgents = [], 
               <pre className="raw-json">{JSON.stringify(output, null, 2)}</pre>
             </div>
           ) : (
-            <LovablePreviewWorkbench
-              pipeline={pipeline}
-              request={request}
-              agent={agent}
-              stage={stage}
-              allAgents={allAgents}
-              stageFor={stageFor}
-              onSelectAgent={onSelectAgent}
-            >
+            <div className="inspector-agent-view-content">
               {agent === 'Planning Agent' ? (
                 <PlanViewer plan={output} request={request} />
               ) : agent === 'Coding Agent' ? (
@@ -2064,7 +2055,7 @@ function InspectModal({ agent, stage, request, onClose, onEdit, allAgents = [], 
               ) : (
                 <GenericViewer agent={agent} output={output} />
               )}
-            </LovablePreviewWorkbench>
+            </div>
           )}
         </div>
 

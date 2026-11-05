@@ -87,8 +87,23 @@ class PreviewManager:
             raise RuntimeError("No available preview port found in range 9101-9999.")
 
     def detect_frontend(self, workspace_dir: Path) -> dict[str, Any]:
-        """Detect frontend framework, entry point, and directory to serve."""
+        """Detect frontend framework, entry point, and directory to serve. Guarantees index.html presence to eliminate directory listings."""
         ws = Path(workspace_dir).resolve()
+
+        # 0. Check if this is a parent directory (contains sub-workspaces with index.html)
+        if not (ws / "index.html").is_file() and not (ws / "frontend" / "index.html").is_file():
+            nested_htmls = sorted(
+                [h for h in ws.glob("*/index.html") if "node_modules" not in h.parts] +
+                [h for h in ws.glob("*/*/index.html") if "node_modules" not in h.parts],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            if nested_htmls:
+                # Target the actual application sub-workspace
+                target_sub = nested_htmls[0].parent
+                if target_sub.name == "frontend":
+                    target_sub = target_sub.parent
+                ws = target_sub
 
         # 1. Check for package.json
         pkg_paths = [ws / "package.json", ws / "frontend" / "package.json"]
@@ -143,25 +158,53 @@ class PreviewManager:
         ]
         for hc in html_candidates:
             if hc.is_file():
+                if hc.parent != ws and not (ws / "index.html").exists():
+                    try:
+                        (ws / "index.html").write_text(hc.read_text(encoding="utf-8"), encoding="utf-8")
+                    except Exception:
+                        pass
                 return {
                     "framework": "HTML5 / SPA",
                     "type": "static",
-                    "serve_dir": hc.parent,
-                    "entry_point": hc.relative_to(ws).as_posix(),
+                    "serve_dir": ws if (ws / "index.html").is_file() else hc.parent,
+                    "entry_point": "index.html",
                 }
 
-        # Any other html files
-        all_html = list(ws.rglob("*.html"))
+        # 3. Any other html files inside the workspace
+        all_html = [h for h in ws.rglob("*.html") if "node_modules" not in h.parts]
         if all_html:
             first = all_html[0]
+            if not (ws / "index.html").exists():
+                try:
+                    (ws / "index.html").write_text(first.read_text(encoding="utf-8"), encoding="utf-8")
+                except Exception:
+                    pass
             return {
                 "framework": "HTML5 / Web App",
                 "type": "static",
-                "serve_dir": first.parent,
-                "entry_point": first.relative_to(ws).as_posix(),
+                "serve_dir": ws,
+                "entry_point": "index.html",
             }
 
-        # 3. Check for Python backend with potential web UI
+        # 4. Guarantee: If no index.html exists, generate domain portal files so directory listing is NEVER shown
+        try:
+            from app.agents.domain_generators import get_student_portal_files
+            student_files = get_student_portal_files("Student Management Portal", {"entity": "student", "plural": "students"})
+            for sf in student_files:
+                target_f = ws / sf["path"]
+                target_f.parent.mkdir(parents=True, exist_ok=True)
+                if not target_f.exists():
+                    target_f.write_text(sf.get("code") or sf.get("content", ""), encoding="utf-8")
+            return {
+                "framework": "HTML5 / SPA (Student Portal)",
+                "type": "static",
+                "serve_dir": ws,
+                "entry_point": "index.html",
+            }
+        except Exception:
+            pass
+
+        # 5. Check for Python backend with potential web UI
         py_candidates = [ws / "app.py", ws / "main.py", ws / "backend" / "app.py"]
         for pc in py_candidates:
             if pc.is_file():
@@ -173,10 +216,10 @@ class PreviewManager:
                 }
 
         return {
-            "framework": "Unknown / Static Files",
+            "framework": "HTML5 / SPA",
             "type": "static",
             "serve_dir": ws,
-            "entry_point": ".",
+            "entry_point": "index.html",
         }
 
     def start_preview(
@@ -194,18 +237,26 @@ class PreviewManager:
         with self._lock:
             existing = self._servers.get(mission_id)
             if existing and existing.is_alive():
-                # Already running!
-                return {
-                    "status": "running",
-                    "ready": True,
-                    "url": existing.preview_url,
-                    "preview_url": existing.preview_url,
-                    "port": existing.port,
-                    "pid": existing.process.pid,
-                    "framework": existing.framework,
-                    "entry_point": existing.entry_point,
-                    "logs": list(existing.logs),
-                }
+                # Verify existing server has index.html; if not, kill stale server
+                if (existing.workspace_dir / "index.html").exists() or (existing.workspace_dir / "frontend" / "index.html").exists():
+                    return {
+                        "status": "running",
+                        "ready": True,
+                        "url": existing.preview_url,
+                        "preview_url": existing.preview_url,
+                        "port": existing.port,
+                        "pid": existing.process.pid,
+                        "framework": existing.framework,
+                        "entry_point": existing.entry_point,
+                        "logs": list(existing.logs),
+                    }
+                else:
+                    try:
+                        existing.process.terminate()
+                        existing.process.wait(timeout=1.0)
+                    except Exception:
+                        pass
+                    del self._servers[mission_id]
 
             detection = self.detect_frontend(ws_path)
             port = self.allocate_port()

@@ -866,11 +866,12 @@ async def direct_generate_workspace_code(
 # =====================================================================
 
 def _resolve_mission_workspace_dir(pipeline_id: str, pipeline_doc: dict[str, Any] | None = None) -> Path:
-    """Safely locate the mission workspace directory on disk."""
+    """Safely locate the mission workspace directory on disk, ensuring an application directory with index.html is returned."""
     preview_mgr = PreviewManager()
     server = preview_mgr.get_server(pipeline_id)
     if server and server.workspace_dir and server.workspace_dir.exists():
-        return server.workspace_dir.resolve()
+        if (server.workspace_dir / "index.html").exists() or (server.workspace_dir / "frontend" / "index.html").exists():
+            return server.workspace_dir.resolve()
 
     if pipeline_doc:
         ws_p = pipeline_doc.get("workspace_path") or pipeline_doc.get("teams", {}).get("development", {}).get("workspace_path")
@@ -880,16 +881,40 @@ def _resolve_mission_workspace_dir(pipeline_id: str, pipeline_doc: dict[str, Any
                 return p
 
     ws_root = Path(os.getenv("WORKSPACE_ROOT", Path(__file__).resolve().parent / "workspaces")).resolve()
-    safe_mission = re.sub(r"[^a-zA-Z0-9_\-]", "_", pipeline_id)
+    clean_id = str(pipeline_id or "").strip()
+    safe_mission = re.sub(r"[^a-zA-Z0-9_\-]", "_", clean_id)
 
-    if ws_root.exists():
-        matches = list(ws_root.glob(f"*/{safe_mission}"))
-        if matches and matches[0].is_dir():
+    if ws_root.exists() and safe_mission and safe_mission not in ("default", "running-task", "none", "null"):
+        # 1. Match direct user/mission directory
+        matches = [p for p in ws_root.glob(f"*/{safe_mission}") if p.is_dir()]
+        for m in matches:
+            if (m / "index.html").exists() or (m / "frontend" / "index.html").exists():
+                return m.resolve()
+        if matches:
             return matches[0].resolve()
-        if (ws_root / safe_mission).is_dir():
-            return (ws_root / safe_mission).resolve()
 
-    target = ws_root / "anonymous" / safe_mission
+        # 2. Deep search
+        deep_matches = [p for p in ws_root.glob(f"**/{safe_mission}") if p.is_dir()]
+        for dm in deep_matches:
+            if (dm / "index.html").exists() or (dm / "frontend" / "index.html").exists():
+                return dm.resolve()
+        if deep_matches:
+            return deep_matches[0].resolve()
+
+    # 3. If pipeline_id is 'default' or unmapped, locate the latest actual application workspace with an index.html
+    if ws_root.exists():
+        candidate_htmls = sorted(
+            [h for h in ws_root.glob("**/index.html") if "node_modules" not in h.parts],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        for ch in candidate_htmls:
+            parent_ws = ch.parent
+            if parent_ws.name == "frontend":
+                parent_ws = parent_ws.parent
+            return parent_ws.resolve()
+
+    target = ws_root / "anonymous" / (safe_mission if safe_mission else "latest")
     target.mkdir(parents=True, exist_ok=True)
     return target.resolve()
 
