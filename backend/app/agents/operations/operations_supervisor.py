@@ -44,13 +44,21 @@ class OperationsSupervisor:
 
     async def run_pipeline(self, task: dict[str, Any], development: dict[str, Any]) -> dict[str, Any]:
         workspace = development.get("workspace")
-        if workspace is None and development.get("workspace_path"):
+        if workspace is None or not hasattr(workspace, "root_path"):
             from app.tools.workspace import WorkspaceManager
-            workspace = WorkspaceManager(
-                workspace_root=Path(development["workspace_path"]).parent.parent,
-                user_id=task.get("user_id") or "anonymous",
-                mission_id=task["id"],
-            )
+            ws_path = development.get("workspace_path") or development.get("workspace_dir")
+            if ws_path:
+                ws_p = Path(ws_path).resolve()
+                workspace = WorkspaceManager(
+                    workspace_root=ws_p.parent.parent,
+                    user_id=ws_p.parent.name,
+                    mission_id=ws_p.name,
+                )
+            else:
+                workspace = WorkspaceManager(
+                    user_id=task.get("user_id") or "anonymous",
+                    mission_id=task.get("id") or "default",
+                )
         context: dict[str, Any] = {"development": development, "workspace": workspace}
         stages: list[dict[str, Any]] = []
         logs: list[dict[str, str]] = []

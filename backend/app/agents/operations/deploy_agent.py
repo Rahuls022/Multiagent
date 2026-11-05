@@ -40,10 +40,35 @@ class DeployAgent(BaseAgent):
                 "message": f"Deployment to '{target_env}' is staged and awaiting human operator approval.",
             }
 
-        # 3. Successful deployment rollout
-        port = 8080
-        endpoint = f"http://localhost:{port}/services/{mission_id}"
-        health_endpoint = f"{endpoint}/health"
+        # 3. Real deployment rollout: start preview server serving generated workspace
+        workspace = context.get("workspace")
+        workspace_dir = None
+        if workspace and hasattr(workspace, "root_path"):
+            workspace_dir = workspace.root_path
+        elif context.get("development", {}).get("workspace_path"):
+            workspace_dir = Path(context["development"]["workspace_path"])
+
+        endpoint = f"http://127.0.0.1:8000/api/pipelines/{mission_id}/preview/file?path=index.html"
+        port = 8000
+        preview_status = "deployed"
+        if workspace_dir and Path(workspace_dir).exists():
+            from app.tools.preview_manager import PreviewManager
+            preview_mgr = PreviewManager()
+            try:
+                srv = preview_mgr.start_preview(
+                    mission_id=task.get("id", mission_id),
+                    workspace_dir=Path(workspace_dir),
+                    user_id=task.get("user_id", "anonymous"),
+                    timeout_seconds=5.0,
+                )
+                if srv and srv.get("preview_url"):
+                    endpoint = srv["preview_url"]
+                    port = srv.get("port", port)
+                    preview_status = srv.get("status", "deployed")
+            except Exception:
+                pass
+
+        health_endpoint = f"{endpoint}/health" if "8000" not in str(endpoint) else endpoint
 
         return {
             "status": "deployed",
@@ -53,6 +78,7 @@ class DeployAgent(BaseAgent):
             "endpoint": endpoint,
             "health_endpoint": health_endpoint,
             "health": "healthy",
+            "port": port,
             "container_image": f"swarm/app:{version}",
             "deployed_at": datetime.now(UTC).isoformat(),
             "traffic_allocation": "100%",

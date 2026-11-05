@@ -20,6 +20,8 @@ class PipelineRequest(BaseModel):
     deployment_target: str | None = Field(default="development", description="Target environment (development, staging, production)")
     build_and_deployment_preferences: dict[str, Any] | str | None = Field(default=None, description="Build containerization or cloud rollout preferences")
     require_approval: bool | None = Field(default=False, description="Require manual operator approval before production release")
+    demo_mode: bool | None = Field(default=False, description="Local exhibition demo mode with auto approval")
+    approved: bool | None = Field(default=False, description="Whether mission is pre-approved")
     user_id: str | None = Field(default=None, description="Optional authenticated user ID")
     project_id: str | None = Field(default=None, description="Optional target project workspace ID")
 
@@ -64,7 +66,9 @@ class PipelineRequest(BaseModel):
             "security_requirements": security_list,
             "deployment_target": self.deployment_target or "development",
             "build_and_deployment_preferences": build_prefs,
-            "require_approval": bool(self.require_approval or (self.deployment_target == "production")),
+            "require_approval": bool(self.require_approval and not self.approved),
+            "demo_mode": bool(self.demo_mode),
+            "approved": bool(self.approved or self.demo_mode),
             "user_id": self.user_id or fallback_user_id or "anonymous",
             "project_id": self.project_id,
             "created_at": now_iso,

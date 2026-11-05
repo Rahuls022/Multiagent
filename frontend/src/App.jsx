@@ -202,6 +202,7 @@ function App() {
 const [themeMode, setThemeMode] = useState('dark')
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [approving, setApproving] = useState(false)
   const userMenuRef = useRef(null)
 
   // Apply dark theme matching exhibition design
@@ -488,6 +489,32 @@ const handleSaveSettings = async (newSettings) => {
     missionInputRef.current?.select()
     setMissionEditPending(false)
   }, [page, missionEditPending])
+
+    async function handleApproveMission(targetPipelineId) {
+    const id = targetPipelineId || pipeline?.task?.id || pipeline?.pipeline_id
+    if (!id) return
+    setApproving(true)
+    setError('')
+    try {
+      const res = await authFetch(`${apiBase}/pipelines/${id}/approve`, {
+        method: 'POST'
+      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.detail || 'Failed to approve mission')
+      }
+      const data = await res.json()
+      if (data.pipeline) {
+        setPipeline(data.pipeline)
+      }
+      await loadHistory()
+      await loadFailures()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setApproving(false)
+    }
+  }
 
   async function runPipeline(event) { 
     event.preventDefault()
@@ -816,6 +843,8 @@ const handleSaveSettings = async (newSettings) => {
               </button>
             </div>
 
+
+
             {showMissionConfig && (
               <div className="mission-config-panel">
                 <div className="config-grid">
@@ -933,6 +962,34 @@ const handleSaveSettings = async (newSettings) => {
           {error && <p className="error">{error} Start the backend at port 8000 and try again.</p>}
         </section>
 
+        {(pipeline?.status === 'WAITING_FOR_APPROVAL' || pipeline?.workflow_state === 'WAITING_FOR_APPROVAL') && (
+          <section className="mission-approval-banner">
+            <div className="approval-banner-body">
+              <div className="approval-banner-icon">⚠️</div>
+              <div className="approval-banner-info">
+                <h3>Mission Awaiting Human Operator Authorization</h3>
+                <p>
+                  Phase 1 (Development: Planning, Coding, Build, Testing) completed clean with quality gates verified.
+                  Authorize deployment to execute Phase 2 Operations Swarm (Security Audit, Release Packaging, Container Deployment, and Health Monitoring).
+                </p>
+                <div className="approval-meta-row">
+                  <span>Pipeline ID: <code>{pipeline?.task?.id || pipeline?.pipeline_id}</code></span>
+                  <span>Target: <strong>{pipeline?.task?.deployment_target || 'development'}</strong></span>
+                </div>
+              </div>
+              <div className="approval-banner-action-area">
+                <button
+                  className="primary-button approve-mission-btn"
+                  onClick={() => handleApproveMission(pipeline?.task?.id || pipeline?.pipeline_id)}
+                  disabled={approving}
+                >
+                  {approving ? '⏳ Authorizing & Deploying…' : '🚀 Approve Mission & Execute Operations Swarm'}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         <section className="metrics">
           <div><span>Pipeline status</span><strong className={pipeline?.status}>{pipeline?.status ?? 'Ready'}</strong></div>
           <div><span>Active Agents</span><strong>{implementedAgents.size} Collaborating</strong></div>
@@ -1005,6 +1062,9 @@ const handleSaveSettings = async (newSettings) => {
               setSelectedAgent(agentName)
               setInspectorOpen(true)
             }}
+            onApprove={handleApproveMission}
+            onBackToDashboard={() => setPage('dashboard')}
+            user={user}
           />
         </section>
       )}

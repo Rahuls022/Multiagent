@@ -576,10 +576,13 @@ async def get_pipeline(pipeline_id: str, request: Request):
 
 @app.post("/api/pipelines/{pipeline_id}/approve")
 async def approve_pipeline(pipeline_id: str, request: Request):
-    """Operator approval gate to unblock production deployment."""
-    repo = request.app.state.pipeline_repository
-    supervisor = DevelopmentSupervisor(repository=repo)
-    result = await supervisor.approve_pipeline(pipeline_id)
+    """Operator approval gate to unblock production deployment and resume Operations Swarm."""
+    repo = getattr(request.app.state, "pipeline_repository", None) or create_pipeline_repository()
+    dev_supervisor = DevelopmentSupervisor(repository=repo)
+    orchestrator = GlobalOrchestrator(repository=repo, development_supervisor=dev_supervisor)
+    result = await orchestrator.approve_and_resume_pipeline(pipeline_id)
+    if not result:
+        result = await dev_supervisor.approve_pipeline(pipeline_id)
     if not result:
         raise HTTPException(status_code=404, detail=f"Pipeline {pipeline_id} not found or not awaiting approval.")
     return {"status": "approved", "pipeline": result}

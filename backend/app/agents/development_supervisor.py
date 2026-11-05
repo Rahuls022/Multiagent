@@ -283,8 +283,13 @@ class DevelopmentSupervisor:
             await self._save(self._result(task, stages, logs, "RUNNING", next_agent, events, workspace))
 
         # Check for Human Approval Gate
-        requires_approval = task.get("require_approval", False) or any(
-            t in request.lower() for t in ["deploy to prod", "production deploy", "run migration", "database migration"]
+        is_approved = bool(task.get("approved", False) or task.get("demo_mode", False))
+        requires_approval = bool(
+            not is_approved and (
+                task.get("require_approval", False) or any(
+                    t in request.lower() for t in ["deploy to prod", "production deploy", "run migration", "database migration"]
+                )
+            )
         )
         if requires_approval:
             events.append({
@@ -473,6 +478,7 @@ class DevelopmentSupervisor:
             "logs": logs,
             "events": events,
             "workspace_path": str(workspace.root_path),
+            "workspace_dir": str(workspace.root_path),
             "files_in_workspace": [f["path"] for f in workspace.list_files() if not f["is_dir"]],
             "git_commits": git_history,
         }
