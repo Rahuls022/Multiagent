@@ -540,11 +540,11 @@ const handleSaveSettings = async (newSettings) => {
     })
     try { 
       // Connect active swarm settings into backend pipeline request
+      const targetEnv = deploymentTarget || 'development'
       const shouldRequireApproval = Boolean(
         requireApproval ||
-        (settings.autonomous?.requireHumanApproval && settings.safety?.approvalBeforeProduction)
+        (targetEnv === 'production' && settings.autonomous?.requireHumanApproval && settings.safety?.approvalBeforeProduction)
       )
-      const targetEnv = deploymentTarget || (settings.safety?.protectedEnvironments?.production ? 'development' : 'staging')
       const testingSpecs = settings.buildTesting?.qualityGates
         ? [`Quality Gate: ${settings.buildTesting.minSuccessRate || 85}% minimum test coverage`, ...(testingRequirements ? [testingRequirements] : [])]
         : (testingRequirements ? [testingRequirements] : [])

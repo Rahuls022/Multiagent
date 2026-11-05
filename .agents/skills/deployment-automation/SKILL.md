@@ -16,3 +16,4 @@ Automate application deployment into sandboxed local runtime environments. Selec
 3. **Port Allocation & Conflict Prevention**: Dynamically locate and bind an unused TCP port (`9101-9999`) on `127.0.0.1` without collision.
 4. **Endpoint Health Probing**: Execute live HTTP socket or urllib GET probes to confirm the server returns status 200 OK before declaring deployment successful.
 5. **Preview URL Propagation**: Supply the exact, verified live URL (`http://127.0.0.1:<port>`) to the orchestrator and Website Viewer.
+

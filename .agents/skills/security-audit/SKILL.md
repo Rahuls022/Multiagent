@@ -16,3 +16,4 @@ Perform automated zero-trust security audits on all generated application artifa
 3. **Command & Script Sanitization**: Verify that no subprocess shell calls execute unescaped user inputs (`eval`, `exec`, arbitrary SQL concatenations).
 4. **Boundary Checks**: Check for path traversal vulnerabilities (`../`, `/etc/`, absolute overrides) in file operations.
 5. **Quality Gate Verdict**: If high-severity vulnerabilities or credential leaks are detected, stop the pipeline immediately.
+

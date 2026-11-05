@@ -12,11 +12,16 @@ from typing import Any, Dict, List
 
 def extract_business_name(request: str) -> str:
     """Extract a clean, professional business name from natural language request."""
-    req = request.strip()
+    core = request.split("|")[0].strip() if "|" in request else request.strip()
+    req = core
     if re.search(r"\bfreshsip\b", req, re.IGNORECASE):
         return "FreshSip Juice Centre"
     if re.search(r"\btestflow\b", req, re.IGNORECASE):
         return "TestFlow"
+    if re.search(r"\be[-\s]?commerce\b", req, re.IGNORECASE):
+        return "E-Commerce Platform"
+    if re.search(r"\bstudent\b", req, re.IGNORECASE):
+        return "Student Management Portal"
 
     # Strip leading action verbs and determiners
     clean = re.sub(
@@ -539,8 +544,9 @@ def get_generic_commerce_profile(business_name: str, domain_theme: str) -> Dict[
 
 def project_context(request: str) -> dict[str, Any]:
     """Analyzes the user mission request and extracts an authentic business profile."""
-    text = request.lower().strip()
-    business_name = extract_business_name(request)
+    core_req = request.split("|")[0].strip() if "|" in request else request.strip()
+    text = core_req.lower().strip()
+    business_name = extract_business_name(core_req)
 
     # 1. Student / Academic Portal
     if any(k in text for k in ["student", "school", "education", "university", "academic", "course", "college", "campus", "gradebook", "classroom", "curriculum", "transcripts"]):
@@ -589,84 +595,6 @@ def project_context(request: str) -> dict[str, Any]:
             ],
             "feature_slug": "students",
             "pascal_entity": "Student",
-        }
-
-    # 1.5. Unit & Integration Testing Platform (TestFlow)
-    if any(k in text for k in ["test", "testing", "unit test", "integration test", "testflow", "qa", "quality assurance", "test automation", "test suite", "test case"]):
-        tf_name = "TestFlow – Unit & Integration Testing Management Platform" if any(w in text for w in ["testflow", "unit", "integration", "platform", "portal"]) else (business_name if "test" in business_name.lower() else f"{business_name} Testing Platform")
-        return {
-            "domain": "testing",
-            "name": tf_name,
-            "kind": "Unit & Integration Testing Management Platform",
-            "actor": "QA Engineer & Test Architect",
-            "entity": "test_suite",
-            "plural": "test_suites",
-            "primary_action": "manage unit test suites, run integration pipelines, monitor real-time test execution, and analyze coverage metrics",
-            "brand_icon": "⚡",
-            "brand_tag": "Enterprise QA Platform",
-            "hero_tag": "⚡ Continuous Quality Automation",
-            "hero_title": "Enterprise Unit & Integration Testing Platform",
-            "hero_desc": "Unified testing workbench featuring real-time test execution monitoring, scenario building, code coverage analytics, and admin controls.",
-            "kpi_labels": {
-                "catalog": "Total Test Suites",
-                "orders": "Test Runs Executed",
-                "revenue": "Overall Pass Rate",
-                "health": "Code Coverage",
-            },
-            "features": [
-                "Executive QA Dashboard & Real-Time KPI Cards",
-                "Interactive Units Directory with CRUD & Search",
-                "Integration Testing Module with Scenario Configuration",
-                "Real-Time Test Execution Console with Progress Streaming",
-                "Interactive Visual Analytics (Coverage, Trends, Pass/Fail Ratio)",
-                "Protected Admin Settings with Auth & Healing Control",
-            ],
-            "domain_models": [
-                {
-                    "name": "TestSuite",
-                    "fields": [
-                        {"name": "id", "type": "String", "description": "Unique test suite identifier"},
-                        {"name": "name", "type": "String", "description": "Test suite name"},
-                        {"name": "type", "type": "Enum", "description": "Unit | Integration | E2E | Security | API"},
-                        {"name": "module", "type": "String", "description": "Application module under test"},
-                        {"name": "cases_count", "type": "Integer", "description": "Total assertions count"},
-                        {"name": "status", "type": "Enum", "description": "Passed | Failed | Running | Pending"},
-                        {"name": "coverage", "type": "Float", "description": "Code coverage percentage"},
-                        {"name": "duration_ms", "type": "Integer", "description": "Execution duration in milliseconds"},
-                        {"name": "framework", "type": "String", "description": "PyTest | Jest | Playwright | Vitest"},
-                    ],
-                },
-                {
-                    "name": "TestRun",
-                    "fields": [
-                        {"name": "id", "type": "String", "description": "Run execution reference"},
-                        {"name": "suite_name", "type": "String", "description": "Executed suite name"},
-                        {"name": "status", "type": "Enum", "description": "Passed | Failed"},
-                        {"name": "duration_ms", "type": "Integer", "description": "Execution latency"},
-                        {"name": "assertions_passed", "type": "Integer", "description": "Passing assertions"},
-                        {"name": "assertions_failed", "type": "Integer", "description": "Failing assertions"},
-                        {"name": "log_output", "type": "String", "description": "Console output logs"},
-                    ],
-                },
-            ],
-            "routes": [
-                {"method": "GET", "path": "/api/test-suites", "description": "List all test suites with status & module filters"},
-                {"method": "POST", "path": "/api/test-suites", "description": "Create a new unit or integration test suite"},
-                {"method": "POST", "path": "/api/test-runs/execute", "description": "Trigger real-time execution of test suites"},
-                {"method": "GET", "path": "/api/analytics/coverage", "description": "Retrieve comprehensive test analytics"},
-                {"method": "POST", "path": "/api/auth/admin-login", "description": "Authenticate QA administrator"},
-                {"method": "GET", "path": "/api/health", "description": "QA engine health check"},
-            ],
-            "ui": [
-                "Executive QA Dashboard",
-                "Units Directory & Search/Filter Grid",
-                "Integration Testing Scenario Builder",
-                "Real-Time Execution Monitor Console",
-                "Visual Analytics Charts",
-                "Admin Control Panel",
-            ],
-            "feature_slug": "testing",
-            "pascal_entity": "TestSuite",
         }
 
     # 2. Hospital / Healthcare Portal
@@ -950,7 +878,91 @@ def project_context(request: str) -> dict[str, Any]:
             ],
         }
 
-    # 9. Generic Custom Operations System
+    # 12. Unit & Integration Testing Platform (TestFlow - explicit QA requests only)
+    is_explicit_qa = any(k in text for k in ["testflow", "qa platform", "qa dashboard", "qa tool", "testing platform", "testing management", "test management platform", "test runner platform"])
+    is_qa_context = (
+        ("test" in text or "testing" in text)
+        and any(w in text for w in ["platform", "runner", "suite manager", "qa", "execution monitor", "test suite"])
+        and not any(d in text for d in ["commerce", "store", "shop", "ecommerce", "student", "school", "hospital", "patient", "clinic", "restaurant", "food", "juice", "bakery", "clothing", "library", "book", "employee", "hr", "inventory", "warehouse"])
+    )
+    if is_explicit_qa or is_qa_context:
+        tf_name = "TestFlow – Unit & Integration Testing Management Platform" if any(w in text for w in ["testflow", "unit", "integration", "platform", "portal"]) else (business_name if "test" in business_name.lower() else f"{business_name} Testing Platform")
+        return {
+            "domain": "testing",
+            "name": tf_name,
+            "kind": "Unit & Integration Testing Management Platform",
+            "actor": "QA Engineer & Test Architect",
+            "entity": "test_suite",
+            "plural": "test_suites",
+            "primary_action": "manage unit test suites, run integration pipelines, monitor real-time test execution, and analyze coverage metrics",
+            "brand_icon": "⚡",
+            "brand_tag": "Enterprise QA Platform",
+            "hero_tag": "⚡ Continuous Quality Automation",
+            "hero_title": "Enterprise Unit & Integration Testing Platform",
+            "hero_desc": "Unified testing workbench featuring real-time test execution monitoring, scenario building, code coverage analytics, and admin controls.",
+            "kpi_labels": {
+                "catalog": "Total Test Suites",
+                "orders": "Test Runs Executed",
+                "revenue": "Overall Pass Rate",
+                "health": "Code Coverage",
+            },
+            "features": [
+                "Executive QA Dashboard & Real-Time KPI Cards",
+                "Interactive Units Directory with CRUD & Search",
+                "Integration Testing Module with Scenario Configuration",
+                "Real-Time Test Execution Console with Progress Streaming",
+                "Interactive Visual Analytics (Coverage, Trends, Pass/Fail Ratio)",
+                "Protected Admin Settings with Auth & Healing Control",
+            ],
+            "domain_models": [
+                {
+                    "name": "TestSuite",
+                    "fields": [
+                        {"name": "id", "type": "String", "description": "Unique test suite identifier"},
+                        {"name": "name", "type": "String", "description": "Test suite name"},
+                        {"name": "type", "type": "Enum", "description": "Unit | Integration | E2E | Security | API"},
+                        {"name": "module", "type": "String", "description": "Application module under test"},
+                        {"name": "cases_count", "type": "Integer", "description": "Total assertions count"},
+                        {"name": "status", "type": "Enum", "description": "Passed | Failed | Running | Pending"},
+                        {"name": "coverage", "type": "Float", "description": "Code coverage percentage"},
+                        {"name": "duration_ms", "type": "Integer", "description": "Execution duration in milliseconds"},
+                        {"name": "framework", "type": "String", "description": "PyTest | Jest | Playwright | Vitest"},
+                    ],
+                },
+                {
+                    "name": "TestRun",
+                    "fields": [
+                        {"name": "id", "type": "String", "description": "Run execution reference"},
+                        {"name": "suite_name", "type": "String", "description": "Executed suite name"},
+                        {"name": "status", "type": "Enum", "description": "Passed | Failed"},
+                        {"name": "duration_ms", "type": "Integer", "description": "Execution latency"},
+                        {"name": "assertions_passed", "type": "Integer", "description": "Passing assertions"},
+                        {"name": "assertions_failed", "type": "Integer", "description": "Failing assertions"},
+                        {"name": "log_output", "type": "String", "description": "Console output logs"},
+                    ],
+                },
+            ],
+            "routes": [
+                {"method": "GET", "path": "/api/test-suites", "description": "List all test suites with status & module filters"},
+                {"method": "POST", "path": "/api/test-suites", "description": "Create a new unit or integration test suite"},
+                {"method": "POST", "path": "/api/test-runs/execute", "description": "Trigger real-time execution of test suites"},
+                {"method": "GET", "path": "/api/analytics/coverage", "description": "Retrieve comprehensive test analytics"},
+                {"method": "POST", "path": "/api/auth/admin-login", "description": "Authenticate QA administrator"},
+                {"method": "GET", "path": "/api/health", "description": "QA engine health check"},
+            ],
+            "ui": [
+                "Executive QA Dashboard",
+                "Units Directory & Search/Filter Grid",
+                "Integration Testing Scenario Builder",
+                "Real-Time Execution Monitor Console",
+                "Visual Analytics Charts",
+                "Admin Control Panel",
+            ],
+            "feature_slug": "testing",
+            "pascal_entity": "TestSuite",
+        }
+
+    # 13. Generic Custom Operations System
     words = [w for w in business_name.split() if w.lower() not in ["app", "portal", "system", "platform", "manager", "tracker"]]
     main_word = words[0] if words else "Record"
     entity = main_word.lower()

@@ -16,3 +16,4 @@ Test web applications across functional modules: verify navigation routes, form 
 3. **Data Grid & Search Verification**: Confirm that search queries and filter options correctly filter displayed rows or cards without exceptions.
 4. **Local Persistence Verification**: Ensure changes (like adding items to cart or registering records) persist across page interactions.
 5. **Contract Verification**: Verify that frontend API calls match backend route signatures and schemas.
+
